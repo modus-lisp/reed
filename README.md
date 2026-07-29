@@ -20,8 +20,19 @@ Codecs today:
 - **G.711** — ITU-T PCMU (µ-law) and PCMA (A-law) companding, encode and decode.
   Bit-exact to the ITU reference; used on the wire by
   [webrtc-media](https://github.com/modus-lisp/webrtc-media)'s RTP/SRTP audio.
+- **Opus** (RFC 6716) — **CELT-only decoding works** (the WebRTC/WebM music
+  path): the shared range decoder, TOC/packet framing (code 0/1/2/3), and the
+  full CELT layer — coarse/fine energy, band allocation, PVQ (CWRS), transient
+  handling, anti-collapse, the inverse MDCT with overlap-add, the pitch
+  post-filter, and de-emphasis, at 48 kHz, mono and stereo, for all four frame
+  sizes (2.5/5/10/20 ms) and bandwidths (NB/WB/SWB/FB). Verified against the
+  official libopus conformance tools: it **passes `opus_compare`** on the three
+  CELT-only RFC 6716 test vectors (01, 07, 11) and reproduces the encoder's
+  range-coder final state bit-exactly on every packet. SILK, the hybrid mode,
+  and Ogg/`.opus` demux are in progress (see *Next steps*).
 
-Planned next: **HE-AAC/SBR** and an **Opus** decode module (see *Next steps*).
+Planned next: **SILK + hybrid + Ogg** to finish Opus, and **HE-AAC/SBR**
+(see *Next steps*).
 
 Every existing Common Lisp MP3 option binds a C library (`cl-mpg123` →
 `libmpg123`). `reed` fills the gap with a self-contained, dependency-free
@@ -264,9 +275,13 @@ MP3 is correctness-complete (bit-accurate to minimp3 across the corpus), AAC-LC
 tracks ffmpeg to correlation 1.000000 (ADTS and MP4), and G.711 is bit-exact to
 the ITU reference. The library is built to grow:
 
-1. **HE-AAC**: SBR (Spectral Band Replication) and Parametric Stereo on top of
+1. **Opus** (`src/opus/`): CELT-only decode is done and conformance-verified.
+   Remaining, in staged order — **SILK** (LSF/NLSF, LTP, LPC synthesis, gains,
+   stereo prediction, NB/MB/WB → 48 kHz resampling); the **hybrid** mode
+   (SILK+CELT glue) plus PLC; and **Ogg/`.opus`** (OggS page demux) so
+   `decode-opus-file` can consume real `.opus` files.
+2. **HE-AAC**: SBR (Spectral Band Replication) and Parametric Stereo on top of
    the AAC-LC core, for low-bitrate AAC+ streams.
-2. **Opus** decode module (`src/opus/`) — the next standalone codec.
 3. AAC: an FFT-based IMDCT to replace the direct cosine-matrix filterbank (the
    current ≈3.3× real-time cost is dominated by it); the 960/480-sample frame
    lengths; a streaming `decode-next-frame` API.

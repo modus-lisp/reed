@@ -48,10 +48,14 @@ patents expired in 2017; this is an unencumbered clean-room implementation."
                                (:file "tools")
                                (:file "decode")
                                (:file "mp4")))
-                 ;; Opus (RFC 6716) — range decoder + packet framing (Stage 1)
+                 ;; Opus (RFC 6716) — CELT-only decode path (Stage 1)
                  (:module "opus"
                   :serial t
                   :components ((:file "range")
-                               (:file "framing")))
+                               (:file "framing")
+                               (:file "tables")
+                               (:file "mdct")
+                               (:file "celt")
+                               (:file "decode")))
                  ;; G.711 PCMU/PCMA companding
                  (:file "g711")))))

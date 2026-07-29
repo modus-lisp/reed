@@ -13,3 +13,8 @@ test/ref-*.wav
 
 # AAC test corpus (regenerate with test/gen-aac-corpus.sh)
 aac-corpus/
+
+# Opus test artifacts (regenerate; large vectors/pcm live outside the repo)
+test/*.pcm
+test/*.bit
+test/opus-*.pcm

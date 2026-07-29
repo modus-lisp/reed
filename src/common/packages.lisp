@@ -28,7 +28,9 @@
    #:decode-aac #:decode-aac-file
    #:aac-error #:aac-error-message
 
-   ;; ==== Opus (RFC 6716) — range decoder + packet framing (Stage 1) ====
+   ;; ==== Opus (RFC 6716) — CELT-only decode path (Stage 1) ====
+   #:make-opus-decoder #:opus-decoder-state #:opus-decoder-state-p
+   #:decode-opus-packet #:decode-opus-celt
    #:parse-opus-packet #:parse-toc #:opus-toc #:opus-toc-p
    #:opus-toc-config #:opus-toc-mode #:opus-toc-bandwidth
    #:opus-toc-frame-size #:opus-toc-channels #:opus-toc-stereo #:opus-toc-code
