@@ -1,16 +1,7 @@
-;;;; src/decode.lisp — container framing, bit-reservoir assembly, the decode
-;;;; driver, PCM output, and the WAV helper.
+;;;; src/mp3/decode.lisp — MP3 container framing, bit-reservoir assembly, the
+;;;; decode driver, and PCM output.  The PCM struct and WAV writer it emits into
+;;;; live in src/common/pcm.lisp (shared by every reed codec).
 (in-package #:reed)
-
-;;; ---- result -------------------------------------------------------------
-(defstruct pcm
-  "Decoded PCM.  SAMPLES is an interleaved vector: (signed-byte 16) for :pcm16,
-single-float [-1,1] for :float32.  FRAME-COUNT is samples per channel."
-  samples
-  (channels 2 :type fixnum)
-  (sample-rate 44100 :type fixnum)
-  (format :pcm16)
-  (frame-count 0 :type fixnum))
 
 ;;; ---- decoder state ------------------------------------------------------
 (defstruct (decoder (:constructor %make-decoder))
@@ -185,43 +176,3 @@ of stream).  Format is :pcm16 or :float32."
     (let ((bytes (make-array (file-length s) :element-type '(unsigned-byte 8))))
       (read-sequence bytes s)
       (decode-mp3 bytes :format format))))
-
-;;; ---- WAV output ---------------------------------------------------------
-(defun pcm->wav-octets (pcm)
-  "Serialize PCM (16-bit) into a RIFF/WAVE byte vector."
-  (let* ((format (pcm-format pcm))
-         (ch (pcm-channels pcm))
-         (rate (pcm-sample-rate pcm))
-         (src (pcm-samples pcm))
-         (nframes (pcm-frame-count pcm))
-         (bits 16)
-         (block-align (* ch (/ bits 8)))
-         (data-bytes (* nframes block-align))
-         (out (make-array (+ 44 data-bytes) :element-type '(unsigned-byte 8)))
-         (p 0))
-    (labels ((wb (b) (setf (aref out p) (logand b #xff)) (incf p))
-             (str (s) (loop for c across s do (wb (char-code c))))
-             (u16 (v) (wb v) (wb (ash v -8)))
-             (u32 (v) (wb v) (wb (ash v -8)) (wb (ash v -16)) (wb (ash v -24))))
-      (str "RIFF") (u32 (+ 36 data-bytes)) (str "WAVE")
-      (str "fmt ") (u32 16) (u16 1) (u16 ch) (u32 rate)
-      (u32 (* rate block-align)) (u16 block-align) (u16 bits)
-      (str "data") (u32 data-bytes)
-      (ecase format
-        (:pcm16 (dotimes (i (* nframes ch)) (u16 (logand (aref src i) #xffff))))
-        (:float32 (dotimes (i (* nframes ch))
-                    (u16 (logand (max -32768 (min 32767 (round (* (aref src i) 32767.0)))) #xffff))))))
-    out))
-
-(defun write-wav-file (pcm path)
-  "Write PCM to a .wav file at PATH."
-  (with-open-file (s path :direction :output :element-type '(unsigned-byte 8)
-                          :if-exists :supersede :if-does-not-exist :create)
-    (write-sequence (pcm->wav-octets pcm) s))
-  path)
-
-(defun write-wav (pcm destination)
-  "Write PCM as WAV to DESTINATION (a pathname/string, or return octets for T)."
-  (if (eq destination t)
-      (pcm->wav-octets pcm)
-      (write-wav-file pcm destination)))

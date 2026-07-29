@@ -1,21 +1,34 @@
 # reed
 
-A from-scratch **MP3 decoder in pure Common Lisp** — MPEG-1/2/2.5 Audio Layer III
-to PCM, with **no FFI**. The entire codec, container bytes to audio samples, is
-Lisp: frame sync and header parsing, ID3 and Xing/Info/VBRI handling, the bit
-reservoir, Huffman decoding, requantization, MS/intensity stereo, alias
-reduction, the IMDCT, and the polyphase synthesis filterbank.
+A **multi-codec audio library in pure Common Lisp**, with **no FFI** — the audio
+analog of [pigment](https://github.com/modus-lisp/pigment) for images. One flat
+package (`#:reed`) hosts several codecs, each turning bytes into (or out of) a
+shared PCM representation, entirely in Lisp.
+
+Codecs today:
+
+- **MP3** — an MPEG-1/2/2.5 Audio Layer III decoder (frame sync and header
+  parsing, ID3 and Xing/Info/VBRI handling, the bit reservoir, Huffman decoding,
+  requantization, MS/intensity stereo, alias reduction, the IMDCT, and the
+  polyphase synthesis filterbank). Verified bit-accurate to ffmpeg/minimp3.
+- **G.711** — ITU-T PCMU (µ-law) and PCMA (A-law) companding, encode and decode.
+  Bit-exact to the ITU reference; used on the wire by
+  [webrtc-media](https://github.com/modus-lisp/webrtc-media)'s RTP/SRTP audio.
+
+Planned next: **AAC-LC** and **Opus** decode modules (see *Next steps*).
 
 Every existing Common Lisp MP3 option binds a C library (`cl-mpg123` →
 `libmpg123`). `reed` fills the gap with a self-contained, dependency-free
-decoder. It joins the [modus-lisp](https://github.com/modus-lisp) stack of
+library. It joins the [modus-lisp](https://github.com/modus-lisp) stack of
 pure-CL, no-FFI libraries (weft, loom, scribe, gesso, pigment, folio, cram).
 
 MP3's patents expired worldwide in 2017, so this is an unencumbered clean-room
 implementation. Tables and algorithms follow ISO/IEC 11172-3 (MPEG-1) and
-13818-3 (MPEG-2 LSF).
+13818-3 (MPEG-2 LSF); G.711 follows ITU-T Rec. G.711.
 
 ## Status
+
+### MP3 (MPEG-1/2/2.5 Layer III)
 
 | Feature | Status |
 | --- | --- |
@@ -34,6 +47,23 @@ implementation. Tables and algorithms follow ISO/IEC 11172-3 (MPEG-1) and
 > independent reference decoder, to full precision (corr 1.000000) on the exact
 > same files, so this residual is an ffmpeg-vs-spec decoder difference, not a
 > `reed` defect. See `test/reed-24k-vs-minimp3.png`.
+
+### G.711 (ITU-T PCMU / PCMA)
+
+| Feature | Status |
+| --- | --- |
+| µ-law (PCMU) encode + decode | **complete, bit-exact to the ITU reference** |
+| A-law (PCMA) encode + decode | **complete, bit-exact to the ITU reference** |
+| Buffer transforms (PCM frame ↔ codeword frame) + per-sample entry points | complete |
+
+G.711 is stateless per-sample companding between 16-bit linear PCM and 8-bit
+logarithmic codewords. `reed`'s encoder matches the canonical ITU-T G.711
+reference (the Sun/Reese-Campbell `exp_lut` / segment-search formulation) on all
+65 536 possible input samples for both laws, and the decode tables match the
+reference on all 256 codewords. (ffmpeg's `pcm_mulaw`/`pcm_alaw` rounds ~1.8 % of
+samples to the *adjacent* codeword at segment boundaries and is itself the
+outlier — the same pattern as the MP3 24 kHz case above.) See
+`test/g711-test.lisp`.
 
 ## Verification
 
@@ -120,13 +150,29 @@ machine (e.g. a 218 s file decodes in ~2.9 s). Comfortably real-time.
 
 ;; WAV bytes without a file
 (reed:write-wav pcm t)                        ; => RIFF/WAVE octet vector
+
+;; --- G.711 companding (buffer transforms) ---
+;; (signed-byte 16) PCM  <->  (unsigned-byte 8) codewords
+(let ((codes (reed:pcmu-encode pcm-samples)))  ; µ-law; or reed:pcma-encode for A-law
+  (reed:pcmu-decode codes))                     ; => (signed-byte 16) PCM
+;; mulaw-*/alaw-* are aliases for pcmu-*/pcma-*; *-1 variants compand one sample.
 ```
 
 ## Architecture
 
-`src/`, loaded in order:
+The package is flat (`#:reed`); modularity is in the file layout. `src/`, loaded
+in order:
 
-- `bitreader` — MSB-first bit reader over a byte window (side info + reservoir)
+**`src/common/`** — shared substrate across all codecs:
+
+- `packages` — the single `#:reed` package (every codec's exports)
+- `bitreader` — MSB-first bit reader over a byte window (reusable)
+- `pcm` — the **uniform PCM representation** (`pcm` struct: interleaved
+  `samples`, `channels`, `sample-rate`, `format`, `frame-count`) plus the
+  RIFF/WAVE writer. Every decoder emits into this type.
+
+**`src/mp3/`** — the MP3 (MPEG-1/2/2.5 Layer III) pipeline:
+
 - `tables` — the large generated constants: the 32 Huffman decode trees and the
   512-entry synthesis window
 - `huffman` — big-value and count1 (quad) Huffman decoding, linbits/ESC, signs
@@ -138,17 +184,33 @@ machine (e.g. a 218 s file decodes in ~2.9 s). Comfortably real-time.
   overlap-add, frequency inversion
 - `synthesis` — the 32-band polyphase synthesis filterbank
 - `layer3` — scalefactor and Huffman main-data parsing, per-granule pipeline
-- `decode` — container framing, bit-reservoir assembly, output formats, WAV
+- `decode` — container framing, bit-reservoir assembly, output formats
+
+**`src/g711.lisp`** — ITU-T G.711 PCMU/PCMA companding.
+
+### Codec entry-point convention
+
+New codecs slot into this shape:
+
+- **Container/frame codecs** (MP3 today; AAC-LC and Opus next) expose a
+  `decode-<codec>` / `decode-<codec>-file` pair returning a `pcm` struct, and may
+  add a streaming `make-decoder` / `decode-next-frame` API. Their pipeline files
+  live under `src/<codec>/`, and they emit into the shared `pcm` representation.
+- **Sample companders** (G.711) are stateless buffer transforms:
+  `<name>-encode` / `<name>-decode` over sample vectors, with `*-1` per-sample
+  variants. These operate on the raw sample vectors that back a `pcm` (the
+  on-wire buffers RTP wants), so they interoperate with `pcm` without forcing a
+  struct onto the packet path.
 
 ## Next steps
 
-The decoder is correctness-complete for MPEG-1/2/2.5 Layer III (bit-accurate to
-minimp3 across the corpus). Remaining work is features and speed:
+MP3 is correctness-complete (bit-accurate to minimp3 across the corpus) and
+G.711 is bit-exact to the ITU reference. The library is built to grow:
 
-1. Gapless playback via the Xing/LAME encoder-delay tags; seeking via the TOC.
-2. Free-format (bitrate index 0) frames — currently skipped cleanly; decoding
-   them needs per-frame length measurement by scanning to the next sync.
-3. Layer I / Layer II decoding.
+1. **AAC-LC** decode module (`src/aac/`, `decode-aac` → `pcm`) — the next codec.
+2. **Opus** decode module (`src/opus/`) after AAC-LC.
+3. MP3: gapless playback via the Xing/LAME encoder-delay tags; seeking via the
+   TOC; free-format (bitrate index 0) frame decoding; Layer I / Layer II.
 4. Single-float / optimized inner loops for higher throughput.
 
 ## License

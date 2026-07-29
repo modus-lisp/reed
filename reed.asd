@@ -1,29 +1,42 @@
-;;;; reed.asd — a pure Common Lisp MP3 decoder.
+;;;; reed.asd — a pure Common Lisp audio-codec library.
 (asdf:defsystem "reed"
-  :description "A from-scratch MP3 decoder in pure Common Lisp: parse the MPEG
-audio container (ID3v1/v2 skip, frame sync, header, Xing/Info/VBRI tags) and
-decode MPEG-1/2/2.5 Layer III to PCM — bit reservoir, Huffman decode (all 32
-tables), requantization, MS/intensity stereo, alias reduction, the 18-point
-IMDCT with all window types, and the 32-band polyphase synthesis filterbank —
-emitting 16-bit or float32 interleaved samples.  No FFI, no libmpg123: the
-whole codec is bytes to PCM in Lisp.  Verified against ffmpeg (libmp3lame).
-MP3 patents expired in 2017; this is an unencumbered clean-room implementation."
-  :version "0.1.0"
+  :description "A multi-codec audio library in pure Common Lisp — the audio
+analog of pigment for images: one flat package (#:reed) hosting several codecs,
+container to PCM, with no FFI.  Today it ships an MPEG-1/2/2.5 Layer III (MP3)
+decoder — MPEG container parse (ID3v1/v2 skip, frame sync, Xing/Info/VBRI tags),
+bit reservoir, Huffman decode (all 32 tables), requantization, MS/intensity
+stereo, alias reduction, the 18-point IMDCT with all window types, and the
+32-band polyphase synthesis filterbank, emitting 16-bit or float32 interleaved
+PCM (verified bit-accurate against ffmpeg/minimp3) — and the ITU-T G.711 PCMU
+(mu-law) / PCMA (A-law) companders.  AAC-LC and Opus modules are planned.  MP3
+patents expired in 2017; this is an unencumbered clean-room implementation."
+  :version "0.2.0"
   :author "ynniv"
   :license "MIT"
   :depends-on ()
   :serial t
   :components ((:module "src"
                 :serial t
-                :components ((:file "packages")
-                             (:file "bitreader")
-                             (:file "tables")
-                             (:file "huffman")
-                             (:file "header")
-                             (:file "sideinfo")
-                             (:file "requantize")
-                             (:file "stereo")
-                             (:file "imdct")
-                             (:file "synthesis")
-                             (:file "layer3")
-                             (:file "decode")))))
+                :components
+                (;; shared substrate: package, reusable bit reader, the uniform
+                 ;; PCM representation + WAV writer
+                 (:module "common"
+                  :serial t
+                  :components ((:file "packages")
+                               (:file "bitreader")
+                               (:file "pcm")))
+                 ;; MP3 (MPEG-1/2/2.5 Layer III) decode pipeline
+                 (:module "mp3"
+                  :serial t
+                  :components ((:file "tables")
+                               (:file "huffman")
+                               (:file "header")
+                               (:file "sideinfo")
+                               (:file "requantize")
+                               (:file "stereo")
+                               (:file "imdct")
+                               (:file "synthesis")
+                               (:file "layer3")
+                               (:file "decode")))
+                 ;; G.711 PCMU/PCMA companding
+                 (:file "g711")))))
