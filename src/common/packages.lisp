@@ -24,6 +24,10 @@
    ;; conditions
    #:mp3-error #:mp3-error-message
 
+   ;; ==== AAC-LC (MPEG-4 Audio Object Type 2) ====
+   #:decode-aac #:decode-aac-file
+   #:aac-error #:aac-error-message
+
    ;; ==== G.711 (ITU-T PCMU / PCMA companding) ====
    ;; buffer transforms: (signed-byte 16) PCM <-> (unsigned-byte 8) codewords
    #:pcmu-encode #:pcmu-decode #:pcma-encode #:pcma-decode

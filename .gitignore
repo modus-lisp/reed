@@ -10,3 +10,6 @@
 corpus/
 test/out-*.wav
 test/ref-*.wav
+
+# AAC test corpus (regenerate with test/gen-aac-corpus.sh)
+aac-corpus/

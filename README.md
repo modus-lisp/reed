@@ -11,20 +11,27 @@ Codecs today:
   parsing, ID3 and Xing/Info/VBRI handling, the bit reservoir, Huffman decoding,
   requantization, MS/intensity stereo, alias reduction, the IMDCT, and the
   polyphase synthesis filterbank). Verified bit-accurate to ffmpeg/minimp3.
+- **AAC-LC** — an MPEG-4 AAC Low-Complexity decoder (Audio Object Type 2): ADTS
+  framing and MP4/M4A demux, the full raw-data-block syntax (SCE/CPE/LFE, section
+  and scalefactor data, the 11 spectral Huffman codebooks with escape coding),
+  inverse quantization, M/S and intensity stereo, PNS, TNS, and the sine/KBD
+  IMDCT filterbank with all four window sequences. Verified to correlation
+  1.000000 against ffmpeg and cross-checked against FAAD2.
 - **G.711** — ITU-T PCMU (µ-law) and PCMA (A-law) companding, encode and decode.
   Bit-exact to the ITU reference; used on the wire by
   [webrtc-media](https://github.com/modus-lisp/webrtc-media)'s RTP/SRTP audio.
 
-Planned next: **AAC-LC** and **Opus** decode modules (see *Next steps*).
+Planned next: **HE-AAC/SBR** and an **Opus** decode module (see *Next steps*).
 
 Every existing Common Lisp MP3 option binds a C library (`cl-mpg123` →
 `libmpg123`). `reed` fills the gap with a self-contained, dependency-free
 library. It joins the [modus-lisp](https://github.com/modus-lisp) stack of
 pure-CL, no-FFI libraries (weft, loom, scribe, gesso, pigment, folio, cram).
 
-MP3's patents expired worldwide in 2017, so this is an unencumbered clean-room
-implementation. Tables and algorithms follow ISO/IEC 11172-3 (MPEG-1) and
-13818-3 (MPEG-2 LSF); G.711 follows ITU-T Rec. G.711.
+MP3's patents expired worldwide in 2017 and the core AAC-LC patents have since
+expired as well, so these are unencumbered clean-room implementations. Tables and
+algorithms follow ISO/IEC 11172-3 (MPEG-1) and 13818-3 (MPEG-2 LSF) for MP3 and
+ISO/IEC 14496-3 (MPEG-4 Audio) for AAC-LC; G.711 follows ITU-T Rec. G.711.
 
 ## Status
 
@@ -47,6 +54,33 @@ implementation. Tables and algorithms follow ISO/IEC 11172-3 (MPEG-1) and
 > independent reference decoder, to full precision (corr 1.000000) on the exact
 > same files, so this residual is an ffmpeg-vs-spec decoder difference, not a
 > `reed` defect. See `test/reed-24k-vs-minimp3.png`.
+
+### AAC-LC (MPEG-4 Audio Object Type 2)
+
+| Feature | Status |
+| --- | --- |
+| ADTS framing (sync, header, per-frame config) + frame iteration | **complete** |
+| MP4 / M4A demux (ISO-BMFF: moov/trak/stbl, esds AudioSpecificConfig, stsz/stsc/stco/co64) | **complete** |
+| SCE / CPE / LFE elements; DSE / FIL consumed; PCE / CCE rejected cleanly | complete |
+| ICS: all window sequences (long / start / eight-short / stop), sine **and** KBD windows, scalefactor grouping | complete |
+| Section data, differential scalefactors, 11 spectral Huffman codebooks incl. codebook-11 escape | complete |
+| Inverse quant (`x^{4/3}`), scalefactor gain, M/S stereo, intensity stereo, PNS, pulse tool | complete |
+| TNS (parcor→LPC, all-pole filter, per-window direction/order) | complete |
+| 2048/256-point IMDCT, window transitions, overlap-add; 16-bit + float32 output | complete |
+| HE-AAC / SBR + Parametric Stereo | out of scope (deferred) |
+| Main-profile prediction, LTP, SSR gain control, ER/LD/ELD syntaxes | out of scope (LC only) |
+
+AAC-LC is the payload of the overwhelming majority of `.m4a`/`.mp4`, HLS, and
+streaming AAC. `reed` decodes both the ADTS elementary stream (`.aac`) and MP4
+containers (`.m4a`/`.mp4`) through the same core, with the config coming from the
+ADTS header or the `esds` box respectively. The core AAC-LC patents have expired;
+this is a clean-room implementation following ISO/IEC 14496-3. Verified to
+correlation **1.000000** (per-sample RMS within 1 LSB) against ffmpeg across
+tonal, sweep, noise, and music signals at 96k/128k/256k/VBR, mono and stereo, and
+44.1/48/32 kHz, and cross-checked against **FAAD2** (agreement ≥ 0.9999 on tonal
+and music; the perceptual-noise-substitution bands are decoder-defined random and
+match the ffmpeg oracle exactly). Decode runs ≈ 3.3× real time. See
+`test/reed-vs-ffmpeg-aac.png`.
 
 ### G.711 (ITU-T PCMU / PCMA)
 
@@ -151,6 +185,10 @@ machine (e.g. a 218 s file decodes in ~2.9 s). Comfortably real-time.
 ;; WAV bytes without a file
 (reed:write-wav pcm t)                        ; => RIFF/WAVE octet vector
 
+;; --- AAC-LC: ADTS (.aac) or MP4/M4A (.m4a/.mp4), auto-detected ---
+(reed:decode-aac-file "clip.m4a")             ; => pcm struct  (also "stream.aac")
+(reed:decode-aac octets :format :float32)     ; ADTS/raw octets, or an .m4a in memory
+
 ;; --- G.711 companding (buffer transforms) ---
 ;; (signed-byte 16) PCM  <->  (unsigned-byte 8) codewords
 (let ((codes (reed:pcmu-encode pcm-samples)))  ; µ-law; or reed:pcma-encode for A-law
@@ -186,6 +224,24 @@ in order:
 - `layer3` — scalefactor and Huffman main-data parsing, per-granule pipeline
 - `decode` — container framing, bit-reservoir assembly, output formats
 
+**`src/aac/`** — the AAC-LC (MPEG-4 AOT 2) pipeline:
+
+- `tables` — generated ISO/IEC 14496-3 constants: the 11 spectral Huffman
+  codebooks and the scalefactor codebook, scalefactor-window-band offsets, TNS
+  coefficient maps, sample-rate table (`test/gen-aac-tables.py`)
+- `structs` — persistent per-channel state (coefficients, overlap buffer, ICS
+  info, TNS)
+- `huffman` — prefix-code decoders, spectral-band decode (tuple expansion,
+  signs, codebook-11 escape), `x^{4/3}` inverse quant, sine + Kaiser-Bessel
+  derived windows
+- `filterbank` — 2048/256-point IMDCT (cosine-matrix), window assembly for all
+  four window sequences, overlap-add
+- `tools` — TNS (parcor→LPC + all-pole filter), M/S and intensity stereo
+- `decode` — raw_data_block syntax (SCE/CPE/LFE/DSE/FIL), ADTS framing, PNS,
+  pulses, the `decode-aac` / `decode-aac-file` entry points
+- `mp4` — a minimal ISO-BMFF (MP4/M4A) demuxer: box walking, the `esds`
+  AudioSpecificConfig, and `stsz`/`stsc`/`stco`/`co64` sample extraction
+
 **`src/g711.lisp`** — ITU-T G.711 PCMU/PCMA companding.
 
 ### Codec entry-point convention
@@ -204,14 +260,18 @@ New codecs slot into this shape:
 
 ## Next steps
 
-MP3 is correctness-complete (bit-accurate to minimp3 across the corpus) and
-G.711 is bit-exact to the ITU reference. The library is built to grow:
+MP3 is correctness-complete (bit-accurate to minimp3 across the corpus), AAC-LC
+tracks ffmpeg to correlation 1.000000 (ADTS and MP4), and G.711 is bit-exact to
+the ITU reference. The library is built to grow:
 
-1. **AAC-LC** decode module (`src/aac/`, `decode-aac` → `pcm`) — the next codec.
-2. **Opus** decode module (`src/opus/`) after AAC-LC.
-3. MP3: gapless playback via the Xing/LAME encoder-delay tags; seeking via the
+1. **HE-AAC**: SBR (Spectral Band Replication) and Parametric Stereo on top of
+   the AAC-LC core, for low-bitrate AAC+ streams.
+2. **Opus** decode module (`src/opus/`) — the next standalone codec.
+3. AAC: an FFT-based IMDCT to replace the direct cosine-matrix filterbank (the
+   current ≈3.3× real-time cost is dominated by it); the 960/480-sample frame
+   lengths; a streaming `decode-next-frame` API.
+4. MP3: gapless playback via the Xing/LAME encoder-delay tags; seeking via the
    TOC; free-format (bitrate index 0) frame decoding; Layer I / Layer II.
-4. Single-float / optimized inner loops for higher throughput.
 
 ## License
 

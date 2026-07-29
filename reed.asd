@@ -38,5 +38,15 @@ patents expired in 2017; this is an unencumbered clean-room implementation."
                                (:file "synthesis")
                                (:file "layer3")
                                (:file "decode")))
+                 ;; AAC-LC (MPEG-4 Audio Object Type 2) decode pipeline
+                 (:module "aac"
+                  :serial t
+                  :components ((:file "tables")
+                               (:file "structs")
+                               (:file "huffman")
+                               (:file "filterbank")
+                               (:file "tools")
+                               (:file "decode")
+                               (:file "mp4")))
                  ;; G.711 PCMU/PCMA companding
                  (:file "g711")))))
