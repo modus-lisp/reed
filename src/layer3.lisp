@@ -82,7 +82,11 @@
           (t
            (let ((x (- sfc 500)))
              (setf (aref slen 0) (floor x 3) (aref slen 1) (mod x 3)
-                   (aref slen 2) 0 (aref slen 3) 0 bn 2))))
+                   (aref slen 2) 0 (aref slen 3) 0 bn 2)
+             ;; LSF long blocks with scalefac_compress >= 500 carry the high-band
+             ;; preemphasis (pretab), signalled implicitly rather than by a bit
+             ;; (ISO/IEC 13818-3).
+             (setf (aref (si-preflag si) gr ch) 1))))
         (let ((isc (ash sfc -1)))
           (cond
             ((< isc 180)
