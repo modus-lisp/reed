@@ -28,6 +28,16 @@
    #:decode-aac #:decode-aac-file
    #:aac-error #:aac-error-message
 
+   ;; ==== Opus (RFC 6716) — range decoder + packet framing (Stage 1) ====
+   #:parse-opus-packet #:parse-toc #:opus-toc #:opus-toc-p
+   #:opus-toc-config #:opus-toc-mode #:opus-toc-bandwidth
+   #:opus-toc-frame-size #:opus-toc-channels #:opus-toc-stereo #:opus-toc-code
+   #:opus-frame #:opus-frame-data #:opus-frame-start #:opus-frame-size
+   #:opus-error #:opus-error-message
+   ;; range coder (exposed for Stage 2/testing)
+   #:ec-dec-init #:ec-decode #:ec-dec-update #:ec-dec-bit-logp
+   #:ec-dec-icdf #:ec-dec-bits #:ec-dec-uint #:ec-tell #:ec-tell-frac
+
    ;; ==== G.711 (ITU-T PCMU / PCMA companding) ====
    ;; buffer transforms: (signed-byte 16) PCM <-> (unsigned-byte 8) codewords
    #:pcmu-encode #:pcmu-decode #:pcma-encode #:pcma-decode
