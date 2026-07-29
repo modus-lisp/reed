@@ -671,6 +671,27 @@
             (ash (* (+ (aref +celt-cache-caps+ (+ (* +celt-nbebands+ (+ (* 2 lm) c -1)) i)) 64) c n) -2)))))
 
 ;;; ==== quant_all_bands (bands.c) =========================================
+(defparameter *opus-rfc8251* nil
+  "When true, decode with the RFC 8251 decoder update (a.k.a. the libopus
+`UPDATE_DRAFT` behaviour: special_hybrid_folding + the extended lowband/fold
+range in hybrid bands), matching a default libopus 1.4 decode.  When nil (the
+default) reed decodes to the *original* RFC 6716 semantics, which is what the
+official RFC 6716 test vectors (testvector*.dec) were produced with.  The two
+differ only in the hybrid (SILK+CELT) crossover bands.")
+
+(defun special-hybrid-folding (norm norm2off start m dual-stereo)
+  "bands.c special_hybrid_folding: when start != 0 (hybrid), duplicate enough of
+the first coded band's normalised folding data so the (wider) second band can
+fold across its full width.  A no-op for CELT-only (start = 0 is never called)."
+  (declare (type f64vec norm))
+  (let* ((eb +celt-ebands+)
+         (n1 (* m (- (aref eb (+ start 1)) (aref eb start))))
+         (n2 (* m (- (aref eb (+ start 2)) (aref eb (+ start 1))))))
+    (replace norm norm :start1 n1 :end1 n2 :start2 (- (* 2 n1) n2))
+    (when (/= dual-stereo 0)
+      (replace norm norm :start1 (+ norm2off n1) :end1 (+ norm2off n2)
+                         :start2 (+ norm2off (- (* 2 n1) n2))))))
+
 (defun quant-all-bands (start end x y collapse-masks pulses shortblocks spread
                         dual-stereo intensity tf-res total-bits balance dec lm codedbands seed)
   "Decode all bands into X (mono) or X/Y (stereo, Y=X offset N)."
@@ -697,9 +718,12 @@
             (let ((curr-balance (truncate balance (min 3 (- codedbands i)))))
               (setf b (max 0 (min 16383 (min (1+ rembits) (+ (aref pulses i) curr-balance))))))
             (setf b 0))
-        (when (and (or (>= (- (* m (aref +celt-ebands+ i)) n) (* m (aref +celt-ebands+ start))) (= i (1+ start)))
+        (when (and (or (>= (- (* m (aref +celt-ebands+ i)) n) (* m (aref +celt-ebands+ start)))
+                       (and *opus-rfc8251* (= i (1+ start))))
                    (or update-lowband (= lowband-offset 0)))
           (setf lowband-offset i))
+        (when (and *opus-rfc8251* (= i (1+ start)))
+          (special-hybrid-folding norm norm2off start m dual-stereo))
         (let ((lbscratch-avail (not last)))
           (if (and (/= lowband-offset 0) (or (/= spread 3) (> bcur 1) (< tf-change 0)))
               (let ((fold-start 0) (fold-end 0))
@@ -707,7 +731,7 @@
                 (setf fold-start lowband-offset)
                 (loop (decf fold-start) (when (<= (* m (aref +celt-ebands+ fold-start)) (+ eff-lowband norm-offset)) (return)))
                 (setf fold-end (1- lowband-offset))
-                (loop (incf fold-end) (when (or (>= fold-end i) (>= (* m (aref +celt-ebands+ fold-end)) (+ eff-lowband norm-offset n))) (return)))
+                (loop (incf fold-end) (when (or (and *opus-rfc8251* (>= fold-end i)) (>= (* m (aref +celt-ebands+ fold-end)) (+ eff-lowband norm-offset n))) (return)))
                 (setf x-cm 0 y-cm 0)
                 (loop for fi from fold-start below fold-end do
                   (setf x-cm (logior x-cm (aref collapse-masks (+ (* fi cc) 0))))
@@ -964,15 +988,37 @@
             (setf (aref pcm-out (+ (* j cc) c)) (* tmp (/ 1d0 32768)))))
         (setf (aref mem c) m)))))
 
+(defun %celt-reset (st)
+  "OPUS_RESET_STATE for the CELT decoder (celt_decoder.c): clear everything from
+the `rng` field on, and re-seed the log-energy history to -28 dB."
+  (let ((nb +celt-nbebands+))
+    (dotimes (c (celt-decoder-channels st)) (fill (aref (celt-decoder-decode-mem st) c) 0d0))
+    (fill (celt-decoder-old-bande st) 0d0)
+    (fill (celt-decoder-background-loge st) 0d0)
+    (fill (celt-decoder-preemph-memd st) 0d0)
+    (fill (celt-decoder-old-loge st) -28d0)
+    (fill (celt-decoder-old-loge2 st) -28d0)
+    (setf (celt-decoder-postfilter-period st) 0 (celt-decoder-postfilter-period-old st) 0
+          (celt-decoder-postfilter-gain st) 0d0 (celt-decoder-postfilter-gain-old st) 0d0
+          (celt-decoder-postfilter-tapset st) 0 (celt-decoder-postfilter-tapset-old st) 0
+          (celt-decoder-rng st) 0 (celt-decoder-loss-duration st) 0))
+  st)
+
 (defun celt-decode-frame (st data base len lm)
   "Decode one CELT frame from DATA[base,base+len).  Returns an interleaved
 double-float PCM vector of length channels*N in [-1,1] (N = 120<<lm)."
+  (celt-decode-with-ec st (ec-dec-init data :base base :storage len) len lm))
+
+(defun celt-decode-with-ec (st dec len lm)
+  "Decode one CELT frame from an already-initialised range decoder DEC that
+covers LEN bytes.  Shared by CELT-only decode, hybrid (where SILK has already
+consumed the low-band bits from DEC) and the redundancy frames.  Returns an
+interleaved double-float PCM vector of length channels*N in [-1,1]."
   (let* ((cc (celt-decoder-channels st)) (c (celt-decoder-stream-channels st))
          (nb +celt-nbebands+) (m (ash 1 lm)) (n (* m +celt-shortmdctsize+))
          (start (celt-decoder-start st)) (end (celt-decoder-end st))
          (oldbande (celt-decoder-old-bande st)) (oldloge (celt-decoder-old-loge st))
          (oldloge2 (celt-decoder-old-loge2 st)) (bgloge (celt-decoder-background-loge st))
-         (dec (ec-dec-init data :base base :storage len))
          (total-bits (* len 8)))
     (when (= c 1)
       (dotimes (i nb) (setf (aref oldbande i) (max (aref oldbande i) (aref oldbande (+ nb i))))))

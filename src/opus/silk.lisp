@@ -943,7 +943,8 @@ opus_decoder.c do/while loop (one call per SILK frame)."
         ;; stereo->mono transition: keep resampling the right channel through
         ;; channel[1] once, for a smooth collapse (silk/dec_API.c)
         (stereo-to-mono (and (= n-internal 1) (= (silk-decoder-n-internal dec) 2)
-                             (= internal-fs-khz (silk-channel-fs-khz (aref channels 0))))))
+                             (= internal-fs-khz
+                                (silk-channel-fs-khz (aref (silk-decoder-channels dec) 0))))))
     ;; init on mono->stereo
     (when (> n-internal (silk-decoder-n-internal dec))
       (setf (aref channels 1) (make-silk-channel)))
