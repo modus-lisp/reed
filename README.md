@@ -20,8 +20,8 @@ Codecs today:
 - **G.711** — ITU-T PCMU (µ-law) and PCMA (A-law) companding, encode and decode.
   Bit-exact to the ITU reference; used on the wire by
   [webrtc-media](https://github.com/modus-lisp/webrtc-media)'s RTP/SRTP audio.
-- **Opus** (RFC 6716) — **CELT and SILK decoding both work**. The shared range
-  decoder and TOC/packet framing (code 0/1/2/3) feed two decode paths:
+- **Opus** (RFC 6716) — a **full decoder: CELT + SILK + hybrid + Ogg**. The
+  shared range decoder and TOC/packet framing (code 0/1/2/3) feed three modes:
   - **CELT** (music path): coarse/fine energy, band allocation, PVQ (CWRS),
     transient handling, anti-collapse, the inverse MDCT with overlap-add, the
     pitch post-filter and de-emphasis, at 48 kHz, mono/stereo, all four frame
@@ -32,15 +32,23 @@ Codecs today:
     the shell-coded excitation, LTP/LPC synthesis, and libopus's exact polyphase
     resampler from the SILK internal rate (NB 8 / MB 12 / WB 16 kHz) up to 48 kHz.
     Mono and stereo, 10/20/40/60 ms, including mono↔stereo transitions.
+  - **Hybrid** (SWB/FB, configs 12–15): SILK decodes the low band and CELT the
+    high band (start band 17) from the *same* range decoder in sequence, summed;
+    plus the SILK↔CELT redundancy frames that cross-fade mode switches.
+  - **Ogg `.opus` demux** (RFC 3533 + RFC 7845): OggS page parse and packet
+    reassembly, the OpusHead header (pre-skip, output gain, mapping family 0),
+    OpusTags skip, pre-skip/end-granule trimming — so real `.opus` files decode.
   Verified against the official libopus conformance tools (`opus_compare`):
-  **passes** the CELT-only RFC 6716 vectors (01, 07, 11) *and* the SILK-only
-  vectors (**02, 03, 04**) at 100 %, and reproduces the encoder's range-coder
-  final state bit-exactly on every packet. The **hybrid** mode (SILK low band +
-  CELT high band), the SILK↔CELT redundancy/crossfade at mode transitions,
-  PLC/FEC, and Ogg/`.opus` demux remain for the next stage (see *Next steps*).
+  **all 12 official RFC 6716 test vectors pass**, reproducing the encoder's
+  range-coder final state **bit-exactly on every packet** of all twelve. Real
+  `.opus` files decode to correlation **1.0** (music) / **0.9998** (voice) vs
+  libopus with exact pre-skip alignment. The decoder follows the original RFC
+  6716 semantics by default (matching the test vectors); the RFC 8251 decoder
+  update (a libopus-1.4-compatible hybrid fold) is available via
+  `*opus-rfc8251*`. PLC/FEC (LBRR/CNG) and multichannel mapping families 1/255
+  are the only deferred pieces (file decode needs neither).
 
-Planned next: **hybrid + Ogg** to finish Opus, and **HE-AAC/SBR**
-(see *Next steps*).
+Planned next: **HE-AAC/SBR** (see *Next steps*).
 
 Every existing Common Lisp MP3 option binds a C library (`cl-mpg123` →
 `libmpg123`). `reed` fills the gap with a self-contained, dependency-free
@@ -208,6 +216,11 @@ machine (e.g. a 218 s file decodes in ~2.9 s). Comfortably real-time.
 (reed:decode-aac-file "clip.m4a")             ; => pcm struct  (also "stream.aac")
 (reed:decode-aac octets :format :float32)     ; ADTS/raw octets, or an .m4a in memory
 
+;; --- Opus (RFC 6716): full CELT + SILK + hybrid, Ogg .opus or raw packets ---
+(reed:decode-opus-file "clip.opus")           ; => pcm @ 48 kHz (Ogg demux, pre-skip applied)
+(reed:decode-opus octets)                     ; auto-detects Ogg vs a raw Opus packet
+;; set reed:*opus-rfc8251* to t for the RFC 8251 update (libopus-1.4-compatible hybrid)
+
 ;; --- G.711 companding (buffer transforms) ---
 ;; (signed-byte 16) PCM  <->  (unsigned-byte 8) codewords
 (let ((codes (reed:pcmu-encode pcm-samples)))  ; µ-law; or reed:pcma-encode for A-law
@@ -283,12 +296,12 @@ MP3 is correctness-complete (bit-accurate to minimp3 across the corpus), AAC-LC
 tracks ffmpeg to correlation 1.000000 (ADTS and MP4), and G.711 is bit-exact to
 the ITU reference. The library is built to grow:
 
-1. **Opus** (`src/opus/`): CELT and SILK decode are both done and
-   conformance-verified. Remaining, in staged order — the **hybrid** mode
-   (SILK low band + CELT high band sharing one range coder, the CELT start-band,
-   and the SILK↔CELT redundancy/crossfade at mode switches); **PLC/FEC** (LBRR
-   frames are currently parsed and skipped); and **Ogg/`.opus`** (OggS page
-   demux) so `decode-opus-file` can consume real `.opus` files.
+1. **Opus** (`src/opus/`): the decoder is complete and conformance-verified —
+   CELT, SILK, hybrid, and Ogg `.opus` demux, passing all 12 official RFC 6716
+   vectors. The only deferred pieces are **PLC/FEC** (LBRR frames are parsed and
+   skipped; packet-loss concealment / CNG matter for a lossy transport, not file
+   decode) and **multichannel** mapping families 1/255 (family 0 mono/stereo is
+   done). These are additive and outside the file-decode path.
 2. **HE-AAC**: SBR (Spectral Band Replication) and Parametric Stereo on top of
    the AAC-LC core, for low-bitrate AAC+ streams.
 3. AAC: an FFT-based IMDCT to replace the direct cosine-matrix filterbank (the
