@@ -48,7 +48,8 @@ patents expired in 2017; this is an unencumbered clean-room implementation."
                                (:file "tools")
                                (:file "decode")
                                (:file "mp4")))
-                 ;; Opus (RFC 6716) — CELT-only decode path (Stage 1)
+                 ;; Opus (RFC 6716) — full decoder: CELT + SILK + hybrid,
+                 ;; with Ogg (.opus) container demux
                  (:module "opus"
                   :serial t
                   :components ((:file "range")
@@ -58,6 +59,7 @@ patents expired in 2017; this is an unencumbered clean-room implementation."
                                (:file "celt")
                                (:file "silk-tables")
                                (:file "silk")
-                               (:file "decode")))
+                               (:file "decode")
+                               (:file "ogg")))
                  ;; G.711 PCMU/PCMA companding
                  (:file "g711")))))
