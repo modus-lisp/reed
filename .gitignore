@@ -1,0 +1,12 @@
+# build artifacts
+*.fasl
+*.abcl
+*.lx64fsl
+.DS_Store
+*~
+.#*
+
+# test corpus + decode artifacts (regenerate with test/gen-corpus.sh)
+corpus/
+test/out-*.wav
+test/ref-*.wav
