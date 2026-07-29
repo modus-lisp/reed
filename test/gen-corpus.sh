@@ -1,7 +1,8 @@
 #!/bin/bash
 # Build an MP3 test corpus with ffmpeg (differential oracle).
 set -e
-OUT=/home/claude/reed/corpus
+# Output dir (override with $REED_CORPUS); defaults to <repo>/corpus.
+OUT="${REED_CORPUS:-$(cd "$(dirname "$0")/.." && pwd)/corpus}"
 mkdir -p "$OUT"
 SR=44100
 gen() { # name  ffmpeg-source-args
@@ -18,8 +19,13 @@ gen noise     -f lavfi -i "anoisesrc=d=5:c=pink:r=$SR:a=0.3"
 ffmpeg -y -v error -f lavfi -i "sine=frequency=440:sample_rate=$SR:duration=5" \
   -f lavfi -i "sine=frequency=660:sample_rate=$SR:duration=5" \
   -filter_complex "[0:a][1:a]join=inputs=2:channel_layout=stereo" "$OUT/stereo2_src.wav"
-# real music clip: decode a system mp3 to wav (10s)
-ffmpeg -y -v error -i /mnt/siteglass/render/rnd_lib_c1.mp3 -t 10 -ar $SR -ac 2 "$OUT/music_src.wav"
+# real music clip: decode any mp3/audio file to wav (10s). Point $REED_MUSIC_SRC
+# at a file of your choice; if unset, this step is skipped.
+if [ -n "${REED_MUSIC_SRC:-}" ] && [ -f "$REED_MUSIC_SRC" ]; then
+  ffmpeg -y -v error -i "$REED_MUSIC_SRC" -t 10 -ar $SR -ac 2 "$OUT/music_src.wav"
+else
+  echo "REED_MUSIC_SRC unset or missing; skipping the real-music clip." >&2
+fi
 
 # --- encode matrix ---
 encode() { # src  outname  extra-args

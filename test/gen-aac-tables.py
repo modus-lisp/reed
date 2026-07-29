@@ -6,10 +6,14 @@ offsets, TNS coefficient de-quantization maps, sample rates) is taken; these
 are numeric facts from ISO/IEC 14496-3 (reproduced by ffmpeg).  The decoder
 algorithms themselves are written from the ISO specification.
 """
-import re, sys
+import os, re, sys
 
-SRC = "/tmp/aactab.c"
-OUT = "/home/claude/reed/src/aac/tables.lisp"
+# Source aactab.c (from an ffmpeg checkout) and the Lisp output file; both are
+# overridable via the environment. OUT defaults to <repo>/src/aac/tables.lisp.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+SRC = os.environ.get("AACTAB_C", "/tmp/aactab.c")
+OUT = os.environ.get("REED_AAC_TABLES",
+                     os.path.join(_HERE, os.pardir, "src", "aac", "tables.lisp"))
 
 txt = open(SRC).read()
 

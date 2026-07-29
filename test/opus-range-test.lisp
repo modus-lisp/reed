@@ -1,6 +1,9 @@
 ;;;; Standalone unit test for reed's Opus range decoder against a byte stream
-;;;; produced by libopus's ec_enc (test/../opus-build/ectest.*).
-(let ((base "/home/claude/reed/src/"))
+;;;; produced by libopus's ec_enc. Generate the fixtures with a libopus-linked
+;;;; harness (ec_enc a mixed program, dumping ectest.bin + ectest.program.txt)
+;;;; and point $REED_ECTEST_DIR at the directory holding them.
+(let ((base (merge-pathnames "../src/" (or *load-pathname*
+                                           *default-pathname-defaults*))))
   (load (merge-pathnames "common/packages.lisp" base))
   (load (merge-pathnames "common/bitreader.lisp" base))
   (load (merge-pathnames "opus/range.lisp" base)))
@@ -12,12 +15,17 @@
     (let ((v (make-array (file-length s) :element-type '(unsigned-byte 8))))
       (read-sequence v s) v)))
 
-(let* ((buf (read-file-octets "/home/claude/opus-build/ectest.bin"))
+(defparameter *ectest-dir*
+  (or #+sbcl (sb-ext:posix-getenv "REED_ECTEST_DIR")
+      #-sbcl nil
+      "opus-build/"))
+
+(let* ((buf (read-file-octets (merge-pathnames "ectest.bin" *ectest-dir*)))
        (icdf (make-array 6 :element-type '(unsigned-byte 8)
                            :initial-contents '(60 40 25 12 4 0)))
        (d (ec-dec-init buf :storage (length buf)))
        (fails 0) (n 0))
-  (with-open-file (in "/home/claude/opus-build/ectest.program.txt")
+  (with-open-file (in (merge-pathnames "ectest.program.txt" *ectest-dir*))
     (loop for line = (read-line in nil) while line do
       (incf n)
       (let* ((toks (with-input-from-string (s line)

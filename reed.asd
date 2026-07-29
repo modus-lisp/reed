@@ -2,15 +2,17 @@
 (asdf:defsystem "reed"
   :description "A multi-codec audio library in pure Common Lisp — the audio
 analog of pigment for images: one flat package (#:reed) hosting several codecs,
-container to PCM, with no FFI.  Today it ships an MPEG-1/2/2.5 Layer III (MP3)
-decoder — MPEG container parse (ID3v1/v2 skip, frame sync, Xing/Info/VBRI tags),
-bit reservoir, Huffman decode (all 32 tables), requantization, MS/intensity
-stereo, alias reduction, the 18-point IMDCT with all window types, and the
-32-band polyphase synthesis filterbank, emitting 16-bit or float32 interleaved
-PCM (verified bit-accurate against ffmpeg/minimp3) — and the ITU-T G.711 PCMU
-(mu-law) / PCMA (A-law) companders.  AAC-LC and Opus modules are planned.  MP3
-patents expired in 2017; this is an unencumbered clean-room implementation."
-  :version "0.2.0"
+container to PCM, with no FFI.  Codecs: an MPEG-1/2/2.5 Layer III (MP3) decoder
+(container parse, bit reservoir, all 32 Huffman tables, requantization,
+MS/intensity stereo, alias reduction, IMDCT, polyphase synthesis; bit-accurate
+to ffmpeg/minimp3); an MPEG-4 AAC-LC decoder with ADTS and MP4/M4A demux
+(correlation 1.0 vs ffmpeg); a full Opus decoder (RFC 6716: range coder, CELT,
+SILK, hybrid, and Ogg .opus demux; passes all 12 official RFC 6716 test
+vectors); and the ITU-T G.711 PCMU (mu-law) / PCMA (A-law) companders
+(bit-exact to the ITU reference).  Every decoder emits a uniform 16-bit or
+float32 interleaved PCM struct.  Clean-room implementations of unencumbered
+codecs (MP3 patents expired 2017)."
+  :version "0.3.0"
   :author "ynniv"
   :license "MIT"
   :depends-on ()

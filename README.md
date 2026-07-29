@@ -178,7 +178,9 @@ zero output; valid frames after a bad prefix are resynced).
 `test/reed-vs-ffmpeg.png` overlays the reed and ffmpeg waveforms and
 spectrograms for a music clip (visually identical);
 `test/reed-24k-vs-minimp3.png` shows reed ≡ minimp3 with ffmpeg diverging on
-24 kHz transients; `test/reed-music-decoded.wav` is a decoded artifact.
+24 kHz transients. `test/reed-opus-music.wav` is a short decoded-audio artifact
+(from the Opus decoder). The larger decoded WAVs regenerate from the corpus
+scripts and are not committed.
 
 Regenerate everything: `bash test/gen-corpus.sh` then
 `sbcl --load test/decode-all.lisp` and `python3 test/compare.py <ref> <out>`.

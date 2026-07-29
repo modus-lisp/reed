@@ -5,6 +5,11 @@
 .DS_Store
 *~
 .#*
+.cache/
+
+# libopus / FAAD2 conformance build + RFC 6716 vectors (built/fetched separately,
+# live outside the repo; see Verification in the README)
+opus-build/
 
 # test corpus + decode artifacts (regenerate with test/gen-corpus.sh)
 corpus/
@@ -21,3 +26,11 @@ test/opus-*.pcm
 
 # SILK conformance scratch (regenerate with opus_demo)
 scratch-silk/
+
+# Large decoded WAV artifacts (regenerate from the gen-*.sh corpus + decoders).
+# A few small comparison PNGs and one short decoded WAV are kept as proof.
+test/reed-music-decoded.wav
+test/reed-aac-music-decoded.wav
+test/reed-opus-celt-music.wav
+test/reed-opus-silk-voice.wav
+test/reed-opus-celt.png
