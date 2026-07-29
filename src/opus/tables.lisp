@@ -6,7 +6,7 @@
 
 (defparameter +celt-nbEBands+ 21)
 (defparameter +celt-effEBands+ 21)
-(defparameter +celt-overlap+ 120)
+;; +celt-overlap+ (= 120) is defined as a constant in mdct.lisp (compiled next).
 (defparameter +celt-shortMdctSize+ 120)
 (defparameter +celt-maxLM+ 3)
 (defparameter +celt-nbAllocVectors+ 11)

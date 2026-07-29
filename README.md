@@ -20,18 +20,26 @@ Codecs today:
 - **G.711** — ITU-T PCMU (µ-law) and PCMA (A-law) companding, encode and decode.
   Bit-exact to the ITU reference; used on the wire by
   [webrtc-media](https://github.com/modus-lisp/webrtc-media)'s RTP/SRTP audio.
-- **Opus** (RFC 6716) — **CELT-only decoding works** (the WebRTC/WebM music
-  path): the shared range decoder, TOC/packet framing (code 0/1/2/3), and the
-  full CELT layer — coarse/fine energy, band allocation, PVQ (CWRS), transient
-  handling, anti-collapse, the inverse MDCT with overlap-add, the pitch
-  post-filter, and de-emphasis, at 48 kHz, mono and stereo, for all four frame
-  sizes (2.5/5/10/20 ms) and bandwidths (NB/WB/SWB/FB). Verified against the
-  official libopus conformance tools: it **passes `opus_compare`** on the three
-  CELT-only RFC 6716 test vectors (01, 07, 11) and reproduces the encoder's
-  range-coder final state bit-exactly on every packet. SILK, the hybrid mode,
-  and Ogg/`.opus` demux are in progress (see *Next steps*).
+- **Opus** (RFC 6716) — **CELT and SILK decoding both work**. The shared range
+  decoder and TOC/packet framing (code 0/1/2/3) feed two decode paths:
+  - **CELT** (music path): coarse/fine energy, band allocation, PVQ (CWRS),
+    transient handling, anti-collapse, the inverse MDCT with overlap-add, the
+    pitch post-filter and de-emphasis, at 48 kHz, mono/stereo, all four frame
+    sizes (2.5/5/10/20 ms) and bandwidths (NB/WB/SWB/FB).
+  - **SILK** (speech path): a bit-exact fixed-point port — per-frame VAD framing,
+    predictive mid/side stereo, subframe gains, NLSF stage-1/2 VQ with
+    stabilization + interpolation + NLSF→LPC, LTP pitch lags and 5-tap filters,
+    the shell-coded excitation, LTP/LPC synthesis, and libopus's exact polyphase
+    resampler from the SILK internal rate (NB 8 / MB 12 / WB 16 kHz) up to 48 kHz.
+    Mono and stereo, 10/20/40/60 ms, including mono↔stereo transitions.
+  Verified against the official libopus conformance tools (`opus_compare`):
+  **passes** the CELT-only RFC 6716 vectors (01, 07, 11) *and* the SILK-only
+  vectors (**02, 03, 04**) at 100 %, and reproduces the encoder's range-coder
+  final state bit-exactly on every packet. The **hybrid** mode (SILK low band +
+  CELT high band), the SILK↔CELT redundancy/crossfade at mode transitions,
+  PLC/FEC, and Ogg/`.opus` demux remain for the next stage (see *Next steps*).
 
-Planned next: **SILK + hybrid + Ogg** to finish Opus, and **HE-AAC/SBR**
+Planned next: **hybrid + Ogg** to finish Opus, and **HE-AAC/SBR**
 (see *Next steps*).
 
 Every existing Common Lisp MP3 option binds a C library (`cl-mpg123` →
@@ -275,11 +283,12 @@ MP3 is correctness-complete (bit-accurate to minimp3 across the corpus), AAC-LC
 tracks ffmpeg to correlation 1.000000 (ADTS and MP4), and G.711 is bit-exact to
 the ITU reference. The library is built to grow:
 
-1. **Opus** (`src/opus/`): CELT-only decode is done and conformance-verified.
-   Remaining, in staged order — **SILK** (LSF/NLSF, LTP, LPC synthesis, gains,
-   stereo prediction, NB/MB/WB → 48 kHz resampling); the **hybrid** mode
-   (SILK+CELT glue) plus PLC; and **Ogg/`.opus`** (OggS page demux) so
-   `decode-opus-file` can consume real `.opus` files.
+1. **Opus** (`src/opus/`): CELT and SILK decode are both done and
+   conformance-verified. Remaining, in staged order — the **hybrid** mode
+   (SILK low band + CELT high band sharing one range coder, the CELT start-band,
+   and the SILK↔CELT redundancy/crossfade at mode switches); **PLC/FEC** (LBRR
+   frames are currently parsed and skipped); and **Ogg/`.opus`** (OggS page
+   demux) so `decode-opus-file` can consume real `.opus` files.
 2. **HE-AAC**: SBR (Spectral Band Replication) and Parametric Stereo on top of
    the AAC-LC core, for low-bitrate AAC+ streams.
 3. AAC: an FFT-based IMDCT to replace the direct cosine-matrix filterbank (the

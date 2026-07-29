@@ -14,11 +14,43 @@
 (in-package #:reed)
 
 (defstruct (opus-decoder-state (:constructor %make-opus-decoder-state))
-  celt (channels 2 :type fixnum) (sample-rate 48000 :type fixnum))
+  celt silk (channels 2 :type fixnum) (sample-rate 48000 :type fixnum)
+  (last-final-range 0 :type (unsigned-byte 32)))
 
 (defun make-opus-decoder (&key (channels 2))
   "Create a persistent Opus decoder state for CHANNELS output channels."
-  (%make-opus-decoder-state :celt (make-celt-decoder channels) :channels channels))
+  (%make-opus-decoder-state :celt (make-celt-decoder channels)
+                            :silk (make-silk-decoder) :channels channels))
+
+(defun %silk-internal-fs-khz (bandwidth)
+  (ecase bandwidth (:nb 8) (:mb 12) (:wb 16)))
+
+(defun %decode-opus-silk-packet (state toc frames)
+  "Route a SILK-only Opus packet (configs 0-11) → float32 48 kHz PCM."
+  (let* ((silk (opus-decoder-state-silk state))
+         (n-api (opus-decoder-state-channels state))
+         (n-internal (if (opus-toc-stereo toc) 2 1))
+         (fs-khz (%silk-internal-fs-khz (opus-toc-bandwidth toc)))
+         (fsz (opus-toc-frame-size toc))              ; samples @48k per opus frame
+         (payload-ms (truncate (* fsz 1000) 48000))
+         (total (* fsz (length frames)))
+         (i16 (make-array (* n-api total) :element-type 'fixnum :initial-element 0))
+         (base 0))
+    (dolist (fr frames)
+      (let ((d (ec-dec-init (opus-frame-data fr)
+                            :base (opus-frame-start fr) :storage (opus-frame-size fr)))
+            (decoded 0) (first t))
+        (loop while (< decoded fsz) do
+          (incf decoded (silk-decode silk d n-internal n-api fs-khz payload-ms first
+                                     i16 (+ base decoded)))
+          (setf first nil))
+        (setf (opus-decoder-state-last-final-range state) (ec-dec-rng d))
+        (incf base fsz)))
+    (let ((out (make-array (* n-api total) :element-type 'single-float :initial-element 0f0)))
+      (dotimes (i (* n-api total))
+        (setf (aref out i) (* (float (aref i16 i) 1f0) #.(/ 1f0 32768f0))))
+      (make-pcm :samples out :channels n-api :sample-rate 48000
+                :format :float32 :frame-count total))))
 
 (defun %celt-endband (bandwidth)
   (ecase bandwidth (:nb 13) (:mb 17) (:wb 17) (:swb 19) (:fb 21)))
@@ -31,8 +63,10 @@
 48 kHz.  STATE is a persistent opus-decoder-state (energy/overlap carry across
 packets).  Signals opus-error for SILK/hybrid configs (Stage 2/3)."
   (multiple-value-bind (toc frames) (parse-opus-packet data :start start :end end)
+    (when (eq (opus-toc-mode toc) :silk)
+      (return-from decode-opus-packet (%decode-opus-silk-packet state toc frames)))
     (unless (eq (opus-toc-mode toc) :celt)
-      (%opus-err "Stage 1 decodes CELT-only configs 16-31; got ~a/~a (config ~d)"
+      (%opus-err "Stage 1/2 decode CELT (16-31) and SILK (0-11); got ~a/~a (config ~d)"
                  (opus-toc-mode toc) (opus-toc-bandwidth toc) (opus-toc-config toc)))
     (let* ((celt (opus-decoder-state-celt state))
            (lm (%frame-size->lm (opus-toc-frame-size toc)))

@@ -56,6 +56,8 @@ patents expired in 2017; this is an unencumbered clean-room implementation."
                                (:file "tables")
                                (:file "mdct")
                                (:file "celt")
+                               (:file "silk-tables")
+                               (:file "silk")
                                (:file "decode")))
                  ;; G.711 PCMU/PCMA companding
                  (:file "g711")))))
