@@ -27,7 +27,14 @@ sample tag (:pcm16 | :float32), and FRAME-COUNT is samples per channel."
          (ch (pcm-channels pcm))
          (rate (pcm-sample-rate pcm))
          (src (pcm-samples pcm))
-         (nframes (pcm-frame-count pcm))
+         ;; FRAME-COUNT is authoritative when set, but a caller who assembled a
+         ;; PCM by hand and left it at its 0 default gets the count derived from
+         ;; the samples rather than a 44-byte header over an empty data chunk —
+         ;; a file that opens, reports 0 frames, and plays nothing, which reads
+         ;; as a broken decoder instead of a missing argument.
+         (nframes (if (plusp (pcm-frame-count pcm))
+                      (pcm-frame-count pcm)
+                      (floor (length src) (max 1 ch))))
          (bits 16)
          (block-align (* ch (/ bits 8)))
          (data-bytes (* nframes block-align))

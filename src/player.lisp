@@ -86,16 +86,28 @@ or the pipeline stalling."
 
 (defun player-finished-p (p) (and (player-flushed p) (zerop (player-fill p))))
 
-(defun make-mp3-player (path &key (rate 8000) (frame-samples 160) (gain 1.0d0))
-  "Open the MP3 at PATH as a PLAYER delivering FRAME-SAMPLES mono samples at RATE.
+(defun make-mp3-player (source &key (rate 8000) (frame-samples 160) (gain 1.0d0) (start 0))
+  "Open an MP3 as a PLAYER delivering FRAME-SAMPLES mono samples at RATE.
+
+SOURCE is a pathname or namestring to read, or an octet vector already in memory — the latter so
+a caller that wants to SEEK can hold the bytes once and open a new player at an offset, instead
+of re-reading a 180 MB file on every scrub.
+
+START is a byte offset to begin decoding at.  MP3 carries no index, so seeking is done by
+estimating a byte position and resyncing: DECODE-ONE-FRAME scans forward for the next frame
+sync, so ANY offset is safe, and the first frame or two after a seek decode to nothing because
+the bit reservoir has no history yet.  That is a few milliseconds of silence at the seek point,
+and it is what every MP3 player does.
 
 Decoding is INCREMENTAL — one MPEG frame at a time, as frames are asked for — so opening a long
 file is cheap and a real-time consumer never waits on the whole decode.  The resampling is
 stateful across those frames, so the granule boundaries do not tick."
-  (let ((bytes (with-open-file (s path :element-type '(unsigned-byte 8))
-                 (let ((b (make-array (file-length s) :element-type '(unsigned-byte 8))))
-                   (read-sequence b s) b))))
-    (%make-player :decoder (make-decoder bytes) :rate rate
+  (let ((bytes (if (or (stringp source) (pathnamep source))
+                   (with-open-file (s source :element-type '(unsigned-byte 8))
+                     (let ((b (make-array (file-length s) :element-type '(unsigned-byte 8))))
+                       (read-sequence b s) b))
+                   source)))
+    (%make-player :decoder (make-decoder bytes :start start) :rate rate
                   :frame-samples frame-samples :gain (float gain 1d0))))
 
 (defun make-mp3-source (path &key (rate 8000) (frame-samples 160) (gain 1.0d0))

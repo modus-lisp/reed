@@ -45,6 +45,42 @@
 (defun corpus (name)
   (merge-pathnames name (merge-pathnames "corpus/" (asdf:system-source-directory :reed))))
 
+(defun drain-player (p)
+  "Every sample a player will give, joined."
+  (let ((frames '()))
+    (loop for f = (reed:player-next-frame p) while f do (push f frames))
+    (let* ((frames (nreverse frames))
+           (all (reed:make-pcm16 (reduce #'+ frames :key #'length)))
+           (at 0))
+      (dolist (f frames all) (replace all f :start1 at) (incf at (length f))))))
+
+(defun rms (v &optional (start 0) (end (length v)))
+  (if (<= end start) 0d0
+      (let ((s 0d0))
+        (loop for i from start below end do (incf s (expt (float (aref v i) 1d0) 2)))
+        (sqrt (/ s (- end start))))))
+
+(defun envelope (v &optional (window 800))
+  "Loudness over time: the RMS of each WINDOW samples."
+  (let ((n (floor (length v) window)))
+    (make-array n :initial-contents
+                (loop for i below n collect (rms v (* i window) (* (1+ i) window))))))
+
+(defun envelope-align (part whole &optional (window 800))
+  "Where in WHOLE does PART begin, in samples, judged by loudness over time.
+Sample-exact comparison is not available across a seek — the resampler's phase and the bit
+reservoir both restart — but the shape of the music does not move, so the best-matching offset
+answers the question the test is actually asking: did the seek land where it was asked to?"
+  (let* ((ep (envelope part window)) (ew (envelope whole window))
+         (span (min (length ep) 12))       ; ~1.2 s of envelope is plenty to place it
+         (best 0) (best-err nil))
+    (loop for off from 0 to (max 0 (- (length ew) span))
+          for err = (loop for i below span
+                          sum (expt (- (aref ep i) (aref ew (+ off i))) 2))
+          when (or (null best-err) (< err best-err))
+            do (setf best-err err best off))
+    (* best window)))
+
 ;;; ---- 1. downmix ------------------------------------------------------------
 (format t "~&=== downmix ===~%")
 (let ((stereo (make-array 8 :element-type '(signed-byte 16)
@@ -214,6 +250,63 @@
                       (incf a (abs (aref loud i))) (incf b (abs (aref quiet i))))
                     (and (plusp a) (< (* 0.2 a) (* 4 b) (* 1.05 a))))
                   "0.25 gain is about a quarter the level"))))
+
+;;; ---- 5b. opening in memory, and seeking ------------------------------------
+;;;
+;;; Scrubbing a long show is why these exist: re-reading a 180 MB file to move the playhead is
+;;; not a seek, it is a reload.  So a player can be opened over bytes already in hand, at a byte
+;;; offset.  MP3 carries no index — the offset is an estimate and the decoder resyncs to the
+;;; next frame — so what is checked here is that the audio LANDS WHERE ASKED, not that it is
+;;; sample-exact.  It cannot be: the resampler's phase and the bit reservoir both start over.
+(format t "~&~%=== opening in memory, and seeking ===~%")
+(let ((path (corpus "music_cbr128.mp3")))
+  (if (not (probe-file path))
+      (format t "  SKIP no corpus at ~a~%" path)
+      (let* ((bytes (with-open-file (s path :element-type '(unsigned-byte 8))
+                      (let ((b (make-array (file-length s) :element-type '(unsigned-byte 8))))
+                        (read-sequence b s) b)))
+             (whole (drain-player (reed:make-mp3-player path :rate 8000 :frame-samples 160)))
+             (in-mem (drain-player (reed:make-mp3-player bytes :rate 8000 :frame-samples 160))))
+        (check-that "bytes in memory decode exactly like the file they came from"
+                    (equalp whole in-mem)
+                    (format nil "~d samples" (length in-mem)))
+        ;; Halfway through the file is halfway through the audio only because this one is CBR,
+        ;; which is why it is the file this check uses.
+        (let* ((half (drain-player (reed:make-mp3-player bytes :rate 8000 :frame-samples 160
+                                                               :start (floor (length bytes) 2))))
+               (expected (floor (length whole) 2)))
+          (check-that "seeking to the middle returns about half the audio"
+                      (< (* 0.45 (length whole)) (length half) (* 0.55 (length whole)))
+                      (format nil "~d of ~d samples" (length half) (length whole)))
+          (check-that "and it is music, not the silence a failed resync would leave"
+                      (> (rms half) 200d0) (format nil "rms ~,1f" (rms half)))
+          ;; Where did it land?  An ignored :START would align at zero and a botched one
+          ;; anywhere; only a seek that worked aligns near the midpoint.
+          (let ((at (envelope-align half whole)))
+            (check-that "and it starts where it was asked to, not at the beginning"
+                        (< (abs (- at expected)) 8000)   ; within a second, at 8 kHz
+                        (format nil "landed at ~,2f s, asked for ~,2f s"
+                                (/ at 8000.0) (/ expected 8000.0))))))))
+
+;;; ---- 5c. a hand-assembled PCM still writes a playable WAV -------------------
+(format t "~&~%=== the WAV writer ===~%")
+(let* ((n 400)
+       (samples (make-array n :element-type '(signed-byte 16))))
+  (dotimes (i n) (setf (aref samples i) (round (* 8000 (sin (/ (* 2 pi i) 32))))))
+  ;; FRAME-COUNT left at its default is the shape a caller who assembled the samples themselves
+  ;; produces.  The header was written from it verbatim, so such a file said zero frames: it
+  ;; opened, and played nothing, which reads as a broken decoder rather than a missing argument.
+  (let* ((pcm (reed:make-pcm :samples samples :channels 2 :sample-rate 8000 :format :pcm16))
+         (wav (reed:pcm->wav-octets pcm))
+         (data (+ (aref wav 40) (ash (aref wav 41) 8) (ash (aref wav 42) 16) (ash (aref wav 43) 24))))
+    (check "the data chunk holds every sample handed in" data (* n 2))
+    (check "and the file is header plus data" (length wav) (+ 44 (* n 2))))
+  ;; An explicit FRAME-COUNT still wins — it is how a caller says "only this much of the vector".
+  (let* ((pcm (reed:make-pcm :samples samples :channels 2 :sample-rate 8000 :format :pcm16
+                             :frame-count 50))
+         (wav (reed:pcm->wav-octets pcm))
+         (data (+ (aref wav 40) (ash (aref wav 41) 8) (ash (aref wav 42) 16) (ash (aref wav 43) 24))))
+    (check "an explicit frame count is still authoritative" data (* 50 2 2))))
 
 ;;; ---- 6. a buffer source ----------------------------------------------------
 (format t "~&~%=== a buffer source ===~%")
