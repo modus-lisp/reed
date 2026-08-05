@@ -15,6 +15,20 @@
    ;; ---- WAV helper ----
    #:write-wav #:write-wav-file #:pcm->wav-octets
 
+   ;; ==== DSP: what sits between a decoder and a device ====
+   ;; sample plumbing
+   #:pcm16-vector #:make-pcm16 #:clamp16
+   ;; downmix / gain / the mixer
+   #:downmix #:apply-gain #:mix
+   ;; rate conversion (stateful, so a stream converted in pieces has no seams)
+   #:resampler #:resampler-p #:make-resampler #:resample #:resample-pcm
+   #:resampler-in-rate #:resampler-out-rate
+
+   ;; ==== playing a file: fixed-size frames on demand ====
+   #:player #:player-p #:make-mp3-player #:make-mp3-source #:make-buffer-source
+   #:player-next-frame #:player-finished-p #:player-frames
+   #:player-source-rate #:player-source-channels #:player-gain #:drain-source
+
    ;; ==== MP3 (MPEG-1/2/2.5 Layer III) ====
    ;; one-shot decode -> pcm struct
    #:decode-mp3 #:decode-mp3-file

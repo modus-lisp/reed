@@ -26,7 +26,10 @@ codecs (MP3 patents expired 2017)."
                   :serial t
                   :components ((:file "packages")
                                (:file "bitreader")
-                               (:file "pcm")))
+                               (:file "pcm")
+                               ;; what sits between a decoder and a device:
+                               ;; rate conversion, downmix, gain, the mixer
+                               (:file "dsp")))
                  ;; MP3 (MPEG-1/2/2.5 Layer III) decode pipeline
                  (:module "mp3"
                   :serial t
@@ -64,4 +67,7 @@ codecs (MP3 patents expired 2017)."
                                (:file "decode")
                                (:file "ogg")))
                  ;; G.711 PCMU/PCMA companding
-                 (:file "g711")))))
+                 (:file "g711")
+                 ;; playing a file rather than converting one: incremental
+                 ;; decode -> resample -> fixed-size frames on demand
+                 (:file "player")))))
