@@ -414,11 +414,14 @@ supplies the config from the AudioSpecificConfig rather than per-frame ADTS."
         (push (cons (length chans) fr) frames)))
     (aac-assemble-pcm (nreverse frames) channels sample-rate format)))
 
-(defun decode-aac-file (path &key (format :pcm16))
-  "Decode an AAC file (.aac/.adts ADTS, or .m4a/.mp4) into a PCM struct."
+(defun decode-aac-file (path &key (format :pcm16) (trim t))
+  "Decode an AAC file (.aac/.adts ADTS, or .m4a/.mp4) into a PCM struct.
+
+TRIM applies to MP4 only: bare ADTS has no container to declare an encoder delay
+in, so there is nothing there to trim by."
   (let* ((bytes (with-open-file (s path :element-type '(unsigned-byte 8))
                   (let ((v (make-array (file-length s) :element-type '(unsigned-byte 8))))
                     (read-sequence v s) v))))
     (if (aac-mp4-p bytes)
-        (decode-m4a bytes :format format)
+        (decode-m4a bytes :format format :trim trim)
         (decode-aac bytes :format format))))

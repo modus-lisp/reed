@@ -142,17 +142,111 @@ stbl at [START,END) using stsz + stsc + stco/co64."
                         (incf off sz) (incf sample)))))))
             (nreverse aus)))))))
 
-(defun decode-m4a (bytes &key (format :pcm16))
-  "Decode an MP4/M4A file (ISO-BMFF) carrying AAC-LC into a PCM struct."
+;;; ---- encoder delay and padding ------------------------------------------
+;;;
+;;; An AAC encoder cannot start at sample zero.  The filterbank needs a frame of
+;;; overlap before it produces anything, so every encoder emits some silence
+;;; first and the file ends with whatever padding rounded the last frame up to
+;;; 1024 samples.  Those samples are real output of a correct decoder and are
+;;; not part of the recording, so a decoder that keeps them plays the whole file
+;;; ~57 ms late.  Nothing in the AAC bitstream says how many there are; it is
+;;; the container's job, and MP4 has two ways of saying it:
+;;;
+;;;   edts/elst   the standard one — the first segment's media_time is the media
+;;;               sample the presentation starts at
+;;;   iTunSMPB    Apple's, an ASCII tag in udta/meta/ilst carrying the delay,
+;;;               the trailing padding, and the original sample count
+;;;
+;;; This file had only the second, which is common for anything that has been
+;;; through iTunes or Core Media.  A harness that cross-correlates to find its
+;;; own alignment before comparing — which reed's AAC gate does — cannot see a
+;;; constant delay at all, which is why this went unnoticed until a recognizer
+;;; read the same audio twice and disagreed with itself about two words.
+
+(defun %ascii-hex (bytes p n)
+  "N hex digits at P, or NIL if they are not hex."
+  (let ((v 0))
+    (dotimes (i n v)
+      (let* ((c (aref bytes (+ p i)))
+             (d (cond ((<= 48 c 57) (- c 48))
+                      ((<= 97 c 102) (- c 87))
+                      ((<= 65 c 70) (- c 55))
+                      (t (return nil)))))
+        (setf v (logior (ash v 4) d))))))
+
+(defun %find-itunsmpb (bytes start end)
+  "The Apple gapless tag, as (values delay padding original-sample-count).
+Its layout is fixed-width ASCII: a leading field, then 8 hex digits of encoder
+delay, 8 of trailing padding, and 16 of the original sample count."
+  (let ((tag (map '(simple-array (unsigned-byte 8) (*)) #'char-code "iTunSMPB")))
+    (loop for p from start below (- end 8)
+          when (loop for i below 8 always (= (aref bytes (+ p i)) (aref tag i)))
+            do (multiple-value-bind (ds de) (%find-box bytes (+ p 8) end "data")
+                 (when ds
+                   ;; data box: 4 type + 4 locale, then the text
+                   (let ((q (+ ds 8)))
+                     (when (< (+ q 42) de)
+                       (let ((delay (%ascii-hex bytes (+ q 10) 8))
+                             (pad (%ascii-hex bytes (+ q 19) 8))
+                             (orig (%ascii-hex bytes (+ q 28) 16)))
+                         (when (and delay pad orig)
+                           (return (values delay pad orig)))))))))))
+
+(defun %find-elst-delay (bytes trak-start trak-end)
+  "The first edit segment's media_time, if it is a plain forward edit."
+  (multiple-value-bind (es ee) (%find-path bytes trak-start trak-end '("edts" "elst"))
+    (when (and es (> (- ee es) 16))
+      (let ((version (aref bytes es))
+            (count (%be32 bytes (+ es 4))))
+        (when (plusp count)
+          (let ((mt (if (= version 1)
+                        (%be64 bytes (+ es 8 8))
+                        (%be32 bytes (+ es 8 4)))))
+            ;; media_time -1 marks an empty edit, which is a gap and not a trim
+            (and (plusp mt) (/= mt #xffffffff) mt)))))))
+
+(defun %trim-pcm (pcm front keep)
+  "Drop FRONT frames and keep at most KEEP of what is left."
+  (let* ((ch (pcm-channels pcm))
+         (s (pcm-samples pcm))
+         (have (max 0 (- (pcm-frame-count pcm) front)))
+         (n (min (or keep have) have)))
+    (if (and (zerop front) (= n (pcm-frame-count pcm)))
+        pcm
+        (progn
+          (setf (pcm-samples pcm) (subseq s (* front ch) (* (+ front n) ch))
+                (pcm-frame-count pcm) n)
+          pcm))))
+
+(defun decode-m4a (bytes &key (format :pcm16) (trim t))
+  "Decode an MP4/M4A file (ISO-BMFF) carrying AAC-LC into a PCM struct.
+
+TRIM removes the encoder delay and trailing padding the container declares, so
+that sample zero is the first sample of the recording.  NIL keeps every sample
+the decoder produced, which is what you want when comparing against the
+bitstream rather than against the music."
   (let ((bytes (coerce bytes '(simple-array (unsigned-byte 8) (*))))
         (len (length bytes)))
-    (multiple-value-bind (ss se) (%find-path bytes 0 len '("moov" "trak" "mdia" "minf" "stbl"))
-      (unless ss (error 'aac-error :message "no stbl box (not an AAC MP4?)"))
-      (multiple-value-bind (aot sri chan) (%find-esds-asc bytes ss se)
-        (unless aot (error 'aac-error :message "no esds AudioSpecificConfig"))
-        (unless (or (= aot 2) (= aot 1) (= aot 3) (= aot 4))
-          (error 'aac-error :message (format nil "unsupported AAC object type ~a (LC only)" aot)))
-        (let ((aus (aac-mp4-access-units bytes ss se)))
-          (unless aus (error 'aac-error :message "no access units in stbl"))
-          (aac-decode-access-units aus sri (aac-config-channels chan)
-                                   (aref +aac-sample-rates+ sri) :format format))))))
+    (multiple-value-bind (ms me) (%find-path bytes 0 len '("moov"))
+      (unless ms (error 'aac-error :message "no moov box (not an MP4?)"))
+      (multiple-value-bind (ts te) (%find-box bytes ms me "trak")
+        (unless ts (error 'aac-error :message "no trak box"))
+        (multiple-value-bind (ss se) (%find-path bytes ts te '("mdia" "minf" "stbl"))
+          (unless ss (error 'aac-error :message "no stbl box (not an AAC MP4?)"))
+          (multiple-value-bind (aot sri chan) (%find-esds-asc bytes ss se)
+            (unless aot (error 'aac-error :message "no esds AudioSpecificConfig"))
+            (unless (or (= aot 2) (= aot 1) (= aot 3) (= aot 4))
+              (error 'aac-error :message (format nil "unsupported AAC object type ~a (LC only)" aot)))
+            (let ((aus (aac-mp4-access-units bytes ss se)))
+              (unless aus (error 'aac-error :message "no access units in stbl"))
+              (let ((pcm (aac-decode-access-units aus sri (aac-config-channels chan)
+                                                  (aref +aac-sample-rates+ sri) :format format)))
+                (if (not trim)
+                    pcm
+                    (multiple-value-bind (delay pad orig) (%find-itunsmpb bytes ms me)
+                      (declare (ignore pad))
+                      (let ((front (or delay (%find-elst-delay bytes ts te) 0)))
+                        ;; ORIG is a ceiling rather than a promise: a tag written
+                        ;; by one tool and a sample table rewritten by another do
+                        ;; not have to agree, and the samples that exist win.
+                        (%trim-pcm pcm front (and delay orig)))))))))))))

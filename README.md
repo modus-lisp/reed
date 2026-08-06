@@ -88,6 +88,7 @@ ISO/IEC 14496-3 (MPEG-4 Audio) for AAC-LC; G.711 follows ITU-T Rec. G.711.
 | --- | --- |
 | ADTS framing (sync, header, per-frame config) + frame iteration | **complete** |
 | MP4 / M4A demux (ISO-BMFF: moov/trak/stbl, esds AudioSpecificConfig, stsz/stsc/stco/co64) | **complete** |
+| Encoder delay + padding removed as the container declares it (edts/elst, Apple iTunSMPB) | **complete, lag-gated** |
 | SCE / CPE / LFE elements; DSE / FIL consumed; PCE / CCE rejected cleanly | complete |
 | ICS: all window sequences (long / start / eight-short / stop), sine **and** KBD windows, scalefactor grouping | complete |
 | Section data, differential scalefactors, 11 spectral Huffman codebooks incl. codebook-11 escape | complete |
@@ -108,6 +109,21 @@ tonal, sweep, noise, and music signals at 96k/128k/256k/VBR, mono and stereo, an
 and music; the perceptual-noise-substitution bands are decoder-defined random and
 match the ffmpeg oracle exactly). Decode runs ≈ 3.3× real time. See
 `test/reed-vs-ffmpeg-aac.png`.
+
+> **A correlation cannot see a delay.** An AAC encoder cannot start at sample
+> zero — its filterbank needs a frame of overlap first — so a correct decode
+> begins with priming that is not part of the recording, and how much is the
+> container's to declare rather than the bitstream's. `reed` read neither
+> declaration until now, and nothing caught it: `test/aac-compare.py`
+> cross-correlates to find its own alignment before it measures anything, so a
+> decode uniformly 57 ms late scored 1.000000 and passed. What found it was a
+> speech recognizer reading the same `.m4a` twice, once through `reed` and once
+> through ffmpeg, and disagreeing with itself about two words. `decode-m4a` now
+> honours both `edts`/`elst` and Apple's `iTunSMPB` tag (`:trim nil` keeps every
+> sample the decoder produced), and `inspect/mp4-delay-gate.lisp` asserts the
+> lag against a reference decode is the integer **0** — with the same file
+> untrimmed required to come back as exactly the declared delay, so that the
+> gate can tell "we removed the priming" from "we happen to agree".
 
 ### G.711 (ITU-T PCMU / PCMA)
 
@@ -184,6 +200,15 @@ scripts and are not committed.
 
 Regenerate everything: `bash test/gen-corpus.sh` then
 `sbcl --load test/decode-all.lisp` and `python3 test/compare.py <ref> <out>`.
+
+Two gates measure what a correlation cannot. `inspect/dsp-gate.lisp` covers the
+resampler, downmix, mixer, and player. `inspect/mp4-delay-gate.lisp` covers
+where an `.m4a`'s audio starts: its bar is that the lag against ffmpeg's decode
+is the integer 0, with the same file decoded `:trim nil` required to come back
+as exactly the delay the container declared. Its fixtures come from
+`python3 test/gen-mp4-delay.py`, which builds one file per declaration mechanism
+and disables the other in each, so neither can pass on the strength of the one
+it is not testing.
 
 ### Performance
 
