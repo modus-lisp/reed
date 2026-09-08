@@ -17,6 +17,14 @@ Codecs today:
   inverse quantization, M/S and intensity stereo, PNS, TNS, and the sine/KBD
   IMDCT filterbank with all four window sequences. Verified to correlation
   1.000000 against ffmpeg and cross-checked against FAAD2.
+- **FLAC** — lossless, and the only decoder here that can be checked without a
+  reference decoder: STREAMINFO carries the MD5 of the audio the encoder was
+  given, so a decode is verified against the *encoder's* record of the original.
+  Sixteen fixtures pass that check and are also **byte-for-byte identical to
+  ffmpeg** — `equalp`, not a correlation — across compression levels 0 to 12, 8
+  to 24 bits, mono and all four channel assignments, wasted bits, and
+  uncompressible input. Every frame's CRC-16 is checked as it decodes.
+  `src/flac/NOTES.md` has the account.
 - **Vorbis I** — floor 1, all three residue formats, square polar channel
   coupling, block switching with the hybrid windows that lap a long block
   against a short one, and Ogg demux. Verified against libvorbis through ffmpeg:

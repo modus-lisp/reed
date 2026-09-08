@@ -83,6 +83,12 @@ codecs (MP3 patents expired 2017)."
                                (:file "setup")
                                (:file "imdct")
                                (:file "decode")))
+                 ;; FLAC — lossless, and the only codec here that carries its own oracle:
+                 ;; STREAMINFO holds the MD5 of the audio that went in
+                 (:module "flac"
+                  :serial t
+                  :components ((:file "bits")
+                               (:file "decode")))
                  ;; G.711 PCMU/PCMA companding
                  (:file "g711")
                  ;; playing a file rather than converting one: incremental

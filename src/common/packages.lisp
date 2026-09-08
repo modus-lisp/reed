@@ -29,6 +29,17 @@
    #:player-next-frame #:player-finished-p #:player-frames
    #:player-source-rate #:player-source-channels #:player-gain #:drain-source
 
+   ;; ==== FLAC (lossless) ====
+   #:decode-flac #:decode-flac-file #:decode-flac-raw
+   #:make-flac-decoder #:make-flac-decoder-for-header #:decode-flac-packet
+   #:parse-flac-metadata #:flac-info #:fi-sample-rate #:fi-channels #:fi-bits
+   #:fi-total-samples #:fi-md5 #:fi-min-block #:fi-max-block
+   #:flac-error #:flac-error-message
+   #:flac-stats #:make-flac-stats #:*flac-stats*
+   #:fst-frames #:fst-constant #:fst-verbatim #:fst-fixed #:fst-lpc #:fst-wasted
+   #:fst-escaped #:fst-rice2 #:fst-independent #:fst-left-side #:fst-side-right
+   #:fst-mid-side #:fst-max-lpc-order #:fst-max-partition-order
+
    ;; ==== Vorbis I ====
    #:decode-vorbis-ogg #:decode-vorbis-file
    #:decode-vorbis-packet #:vorbis-headers-from-xiph #:make-vorbis-decoder-for-headers
