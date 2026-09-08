@@ -40,6 +40,8 @@
 
    ;; ==== AAC-LC (MPEG-4 Audio Object Type 2) ====
    #:decode-aac #:decode-aac-file
+   ;; streaming AAC, for a container that hands over one access unit at a time
+   #:make-aac-decoder #:decode-aac-packet
    #:aac-error #:aac-error-message
 
    ;; ==== Opus (RFC 6716) — full decoder: CELT + SILK + hybrid + Ogg ====

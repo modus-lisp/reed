@@ -414,6 +414,50 @@ supplies the config from the AudioSpecificConfig rather than per-frame ADTS."
         (push (cons (length chans) fr) frames)))
     (aac-assemble-pcm (nreverse frames) channels sample-rate format)))
 
+(defstruct (aac-decoder (:constructor %make-aac-decoder))
+  "Enough state to decode AAC one access unit at a time.
+
+   AAC is not packet-independent the way Opus is.  A frame overlaps the one before it through the
+   filterbank, coupling channels carry state from element to element, and the noise generator is a
+   running sequence — so a decoder that starts fresh for every access unit produces a click at every
+   frame boundary and the wrong noise everywhere.  Holding that state here is the whole difference
+   between decoding a file and decoding a stream."
+  (elements (make-hash-table :test 'equal))
+  (rng #x1f2e3d4c)                       ; the noise generator, signed or not as its own code leaves it
+  (sr-index 4 :type fixnum)
+  (channels 2 :type fixnum)
+  (sample-rate 44100 :type fixnum))
+
+(defun make-aac-decoder (&key asc sr-index channels sample-rate)
+  "An AAC decoder configured from an AudioSpecificConfig, or from the parts of one.
+
+   ASC is what a container carries: MP4 keeps it in `esds', Matroska in CodecPrivate, and they are
+   the same bytes.  The explicit arguments are the fall-back for a container that declares the rate
+   and channel count but no config."
+  (multiple-value-bind (aot sri chan)
+      (if (and asc (plusp (length asc)))
+          (aac-parse-asc (coerce asc '(simple-array (unsigned-byte 8) (*))) 0 (length asc))
+          (values 2 (or sr-index 4) (or channels 2)))
+    (declare (ignore aot))
+    (let* ((sri (if (and sr-index (not asc)) sr-index sri))
+           (rate (let ((r (aref +aac-sample-rates+ sri)))
+                   (if (plusp r) r (or sample-rate 44100))))
+           (nch (if (plusp chan) chan (or channels 2))))
+      (%make-aac-decoder :sr-index sri :channels nch :sample-rate rate))))
+
+(defun decode-aac-packet (d au &key (format :pcm16))
+  "One raw AAC access unit through D, as a PCM struct of 1024 samples per channel."
+  (let* ((*aac-rng* (aac-decoder-rng d))
+         (br (make-bitreader (coerce au '(simple-array (unsigned-byte 8) (*)))))
+         (chans (aac-decode-raw-block br (aac-decoder-sr-index d) (aac-decoder-elements d)))
+         (fr (make-array (max 1 (length chans)))))
+    (loop for c in chans for i from 0
+          do (setf (aref fr i)
+                   (copy-seq (the (simple-array double-float (*)) (aac-chan-output c)))))
+    (setf (aac-decoder-rng d) *aac-rng*)
+    (aac-assemble-pcm (list (cons (length chans) fr))
+                      (aac-decoder-channels d) (aac-decoder-sample-rate d) format)))
+
 (defun decode-aac-file (path &key (format :pcm16) (trim t))
   "Decode an AAC file (.aac/.adts ADTS, or .m4a/.mp4) into a PCM struct.
 
