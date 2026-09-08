@@ -83,6 +83,12 @@ codecs (MP3 patents expired 2017)."
                                (:file "setup")
                                (:file "imdct")
                                (:file "decode")))
+                 ;; AC-3 (ATSC A/52) — the codec a DVD or a transport stream carries
+                 (:module "ac3"
+                  :serial t
+                  :components ((:file "bits")
+                               (:file "tables")
+                               (:file "decode")))
                  ;; FLAC — lossless, and the only codec here that carries its own oracle:
                  ;; STREAMINFO holds the MD5 of the audio that went in
                  (:module "flac"

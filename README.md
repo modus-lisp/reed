@@ -17,6 +17,14 @@ Codecs today:
   inverse quantization, M/S and intensity stereo, PNS, TNS, and the sine/KBD
   IMDCT filterbank with all four window sequences. Verified to correlation
   1.000000 against ffmpeg and cross-checked against FAAD2.
+- **AC-3** (ATSC A/52) — the codec a DVD or a transport stream carries: the
+  psychoacoustic bit allocation both ends run in lockstep, coupling, stereo
+  rematrixing, block switching, the LFE channel, and the 512/256-point inverse
+  MDCT. Verified against ffmpeg on six fixtures at correlations from 0.99986 to
+  1.000000 — mono, stereo at 96/192/384 kbit/s, 5.1, and 32 kHz. It cannot reach
+  one and `src/ac3/NOTES.md` says exactly why: the dither for zero-bit mantissas
+  is explicitly not normative, and the residual is provably nothing else.
+  Enhanced AC-3 is refused on its bitstream id.
 - **FLAC** — lossless, and the only decoder here that can be checked without a
   reference decoder: STREAMINFO carries the MD5 of the audio the encoder was
   given, so a decode is verified against the *encoder's* record of the original.

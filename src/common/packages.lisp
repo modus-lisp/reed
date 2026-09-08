@@ -29,6 +29,14 @@
    #:player-next-frame #:player-finished-p #:player-frames
    #:player-source-rate #:player-source-channels #:player-gain #:drain-source
 
+   ;; ==== AC-3 (ATSC A/52) ====
+   #:decode-ac3 #:decode-ac3-file #:make-ac3-decoder #:decode-ac3-packet #:ac3-frame-length
+   #:ac3-error #:ac3-error-message
+   #:ac3-stats #:make-ac3-stats #:*ac3-stats*
+   #:ast-frames #:ast-blocks #:ast-coupled #:ast-rematrixed #:ast-short-blocks
+   #:ast-dithered #:ast-delta-alloc #:ast-lfe-frames #:ast-phase-flags
+   #:ast-exp-d15 #:ast-exp-d25 #:ast-exp-d45 #:ast-exp-reuse #:ast-acmods
+
    ;; ==== FLAC (lossless) ====
    #:decode-flac #:decode-flac-file #:decode-flac-raw
    #:make-flac-decoder #:make-flac-decoder-for-header #:decode-flac-packet
