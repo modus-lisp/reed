@@ -24,3 +24,19 @@ if [ -f "$SRC" ]; then
 else
   echo "corpus/music_src.wav missing; skipping" >&2
 fi
+
+# ---- real Dolby-encoded material, which ffmpeg's encoder cannot stand in for -------------------
+# ffmpeg's AC-3 encoder never emits a DYNRNG field, never switches to short blocks, never sends a
+# delta bit allocation and never sets the coupling phase flags.  A decoder can therefore score
+# above 0.9998 on everything above while getting the dynamic range completely wrong -- which is
+# exactly what happened here.  These are film excerpts, so they are fetched rather than committed:
+#
+#   mkdir -p /tmp/fate && cd /tmp/fate
+#   for f in millers_crossing_4.0.ac3 monsters_inc_2.0_192_small.ac3 \
+#            monsters_inc_5.1_448_small.ac3; do
+#     curl -sSLO "https://fate-suite.ffmpeg.org/ac3/$f"
+#   done
+#
+# Note that monsters_inc_5.1_448_small.ac3 is a near-silent passage -- its RMS is about one part in
+# thirty thousand -- so correlation against it measures rounding rather than decoding.  Compare its
+# band energies and check that its frames consume their stated size instead.

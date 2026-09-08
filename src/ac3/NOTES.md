@@ -58,6 +58,26 @@ sequences of equal power do and nothing else does. At 384 kbit/s almost nothing 
 match is 1.000000 with a relative error of one part in ten thousand; at 96 kbit/s a great deal is
 and the error is one part in two hundred.
 
+## The bug only real Dolby content could find
+
+ffmpeg's AC-3 encoder never emits a DYNRNG field. Dolby's uses it constantly — it is how a film
+soundtrack asks for quiet passages to be lifted and loud ones held back — and a decoder that
+ignores it plays the quiet parts far too loud.
+
+The whole synthetic corpus here scored above 0.9998 with the dynamic range handled *wrongly*,
+because the field was never present to be handled. Three real Dolby-encoded tracks from ffmpeg's
+FATE suite scored 0.94, 0.42 and 0.92. Fixing the formula — the gain is
+`2^((x>>5) - 8*(x>>7) - 5) * (32 + (x & 31))`, where the top bit is effectively a sign — took two of
+them to 0.9998 immediately.
+
+The third, a 5.1 excerpt, stayed at 0.92 and is not a bug: its RMS is **1.2 samples out of 32768**,
+about -88 dBFS. It is a near-silent passage where the output is a handful of least-significant bits
+and correlation measures rounding. Its band energies match the reference to two per cent and its
+frames consume their stated size exactly, which are the statistics that mean something there.
+
+Those tracks are film excerpts and are not in this repository. `test/gen-ac3-corpus.sh` says where
+to fetch them.
+
 ## What is not here
 
 **E-AC-3** (bitstream id 16) is a different format wearing the same sync word, and is refused by

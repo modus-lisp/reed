@@ -128,6 +128,21 @@
 ;;; fifty-term Bessel series below is the same one the reference implementation uses, so the two
 ;;; agree to float precision.
 
+(defun %ac3-dynamic-range (bits)
+  "§7.7.1.  The gain a DYNRNG field asks for.
+
+   Three bits of exponent, five of mantissa, and the TOP BIT IS EFFECTIVELY A SIGN: values below
+   128 amplify and values at or above it attenuate, which is what the -8*(bits>>7) term does.  A
+   field of zero is unity gain.
+
+   This is applied because a reference decoder applies it by default, and because it is not
+   optional in any meaningful sense: Dolby-encoded material uses it constantly, and a decoder that
+   ignores it plays quiet passages far too loud.  An encoder that never emits the field — ffmpeg's
+   does not — hides the whole question, which is how this came to be wrong for as long as it was."
+  (declare (type (unsigned-byte 8) bits))
+  (* (expt 2d0 (- (ash bits -5) (* 8 (ash bits -7)) 5))
+     (+ 32 (logand bits 31))))
+
 (defun %ac3-window ()
   (let* ((n 256)
          (half (make-array n :element-type 'double-float))
@@ -631,10 +646,7 @@
       (loop
         (if (plusp (ab1 b))
             (let ((bits (ab b 8)))
-              ;; §7.7: a three-bit exponent and a five-bit mantissa, biased so that 1.0 is neutral
-              (setf (aref (a3-dynamic-range d) i)
-                    (* (/ (+ (logand bits 31) 32) 64d0)
-                       (expt 2d0 (- 3 (ash bits -5))))))
+              (setf (aref (a3-dynamic-range d) i) (%ac3-dynamic-range bits)))
             (when (zerop blk) (setf (aref (a3-dynamic-range d) i) 1d0)))
         (when (minusp (decf i)) (return))))
     ;; ---- coupling strategy
