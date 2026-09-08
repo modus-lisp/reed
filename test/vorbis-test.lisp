@@ -81,6 +81,33 @@
   (ok (format nil "channels with no floor at all: ~d — the `unused' path" (getf totals :unused))
       (plusp (getf totals :unused))))
 
+;;; ---- the fast transform against the definition ---------------------------------------------------
+;;;
+;;; The decoder uses an FFT-based inverse MDCT.  The direct sum it replaced is still in the file and
+;;; this is why: end-to-end against ffmpeg, a transform bug and a residue bug look exactly alike, so
+;;; the transform gets its own oracle that owes nothing to either.
+
+(format t "~&== the FFT transform against the direct sum, at every block size Vorbis allows~%")
+(let ((worst-overall 0d0))
+  (dolist (n '(64 128 256 512 1024 2048 4096 8192))
+    (let* ((half (ash n -1))
+           (spec (make-array half :element-type 'double-float))
+           (a (make-array n :element-type 'double-float :initial-element 0d0))
+           (b (make-array n :element-type 'double-float :initial-element 0d0)))
+      (dotimes (k half) (setf (aref spec k) (- (random 2d0) 1d0)))
+      (reed::%vorbis-imdct spec n a)
+      (reed::%vorbis-imdct-fast spec n b)
+      (let ((worst 0d0) (scale 0d0))
+        (dotimes (i n)
+          (setf worst (max worst (abs (- (aref a i) (aref b i))))
+                scale (max scale (abs (aref a i)))))
+        (let ((rel (/ worst (max scale 1d-30))))
+          (setf worst-overall (max worst-overall rel))
+          (ok (format nil "n = ~4d: relative difference ~,3e" n rel) (< rel 1d-9))))))
+  (ok (format nil "worst disagreement over all block sizes: ~,3e — double rounding, nothing else"
+              worst-overall)
+      (< worst-overall 1d-9)))
+
 ;;; ---- what it turns away -------------------------------------------------------------------------
 
 (format t "~&== refusals~%")

@@ -44,51 +44,6 @@
                (setf (aref w i) (sin (* (/ pi 2d0) x x)))))
     w))
 
-;;; ---- the inverse transform ----------------------------------------------------------------------
-;;;
-;;; A DIRECT SUM, not a fast one.  N/2 coefficients times N outputs is a million multiply-adds for a
-;;; 2048-sample block, which is far more than an FFT-based MDCT would cost — but it is the
-;;; definition, written the way the definition is written, and a fast MDCT is a thing to check
-;;; against something known to be right rather than a thing to start with.
-;;;
-;;; THE NAME IS QUALIFIED BECAUSE REED IS ONE FLAT PACKAGE across every codec in it.  Calling this
-;;; %IMDCT redefined AAC's inverse transform, which takes six arguments rather than three, and the
-;;; AAC suite failed with "invalid number of arguments: 6" from inside a file this work never
-;;; touched.  A flat package means every internal name is a global name.
-
-(defvar *vorbis-imdct-tables* (make-hash-table)
-  "N -> the cosine matrix for a block of that size, built once and shared.")
-
-(defun %vorbis-imdct-table (n)
-  (or (gethash n *vorbis-imdct-tables*)
-      (setf (gethash n *vorbis-imdct-tables*)
-            (let ((tab (make-array (* n (ash n -1)) :element-type 'double-float)))
-              (dotimes (i n tab)
-                (dotimes (k (ash n -1))
-                  (setf (aref tab (+ (* i (ash n -1)) k))
-                        (cos (/ (* pi (+ (* 2 i) 1 (ash n -1)) (+ (* 2 k) 1))
-                                (* 2d0 n))))))))))
-
-(defun %vorbis-imdct (spectrum n out)
-  "y[i] = sum_k X[k] cos(pi (2i+1+n/2)(2k+1) / 2n), the inverse of the MDCT Vorbis uses.
-
-   NO 4/n.  The textbook inverse MDCT carries a 4/N normalisation, and the reference encoder folds
-   exactly that factor into its FORWARD transform instead — so the coefficients in the bitstream are
-   already scaled and applying it again here makes the output five hundred times too quiet.  The
-   giveaway is a correlation of 0.999 against the reference with a relative RMS error of 0.998,
-   which is what a pure gain error looks like and nothing else does."
-  (declare (type (simple-array double-float (*)) spectrum out) (type fixnum n)
-           (optimize (speed 3) (safety 1)))
-  (let ((tab (the (simple-array double-float (*)) (%vorbis-imdct-table n)))
-        (half (ash n -1)))
-    (declare (type fixnum half))
-    (dotimes (i n out)
-      (let ((acc 0d0) (base (* i half)))
-        (declare (type double-float acc) (type fixnum base))
-        (dotimes (k half)
-          (incf acc (* (aref spectrum k) (aref tab (+ base k)))))
-        (setf (aref out i) acc)))))
-
 ;;; ---- decoder state -------------------------------------------------------------------------------
 
 (defstruct (vorbis-decoder (:conc-name vd-) (:constructor %make-vorbis-decoder))
@@ -207,7 +162,7 @@
                       (floor1-curve (car (aref floor-data i)) (cdr (aref floor-data i))
                                     curve half)
                       (dotimes (k half) (setf (aref spec k) (* (aref spec k) (aref curve k))))
-                      (%vorbis-imdct spec n out))
+                      (%vorbis-imdct-fast spec n out))
                     (fill out 0d0))
                 (setf (aref blocks i) out)))
             ;; ---- window and lap

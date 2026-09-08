@@ -93,10 +93,39 @@ either exercises or does not, and a fixture re-encoded some day with different s
 exercising one without any test failing. The suite counts them and asserts the counts are positive:
 2013 short blocks, 435 hybrid windows, 3189 coupled blocks, 161 unused channels across the corpus.
 
+## The inverse transform is one FFT of size N/4
+
+Ten seconds of stereo decoded in about 1.8 seconds with the direct sum, and decodes in 0.09 now:
+**twenty times faster**, a hundred and thirteen times real time.
+
+The derivation is worth writing down because the constants are otherwise unguessable. Substitute
+`j = i + n/4` into
+
+    y[i] = SUM_k X[k] cos( pi (2i+1+n/2)(2k+1) / 2n )
+
+and `2i+1+n/2` becomes `2j+1`, leaving a **DCT-IV of size M = n/2 exactly** — its denominator is
+`4M` — with `y[i] = Z[i + n/4]`. The index runs past the DCT's own range at both ends, and the
+kernel's two symmetries cover it: `Z[2M-1-j] = -Z[j]` and `Z[j+n] = -Z[j]`, both because
+`cos(pi(2k+1)) = -1`. So the whole transform is one DCT-IV and a rearrangement with sign flips.
+
+The DCT-IV in turn is a complex FFT of size `M/2`. Pair the input as `u[p] = x[2p] + i*x[M-1-2p]`,
+which covers the evens ascending and the odds descending, and observe that
+
+    cos(theta (2j+1)(2M-4p-1)) = (-1)^j sin(theta (2j+1)(4p+1)),    theta = pi/4M
+
+so the cosine and sine halves of the sum are the real and imaginary parts of a single complex
+product. Expanding `(4q+1)(4p+1) = 16pq + 4q + 4p + 1` splits the phase into a pre-twiddle in `p`,
+the FFT kernel `2*pi*pq/(M/2)`, and a post-twiddle in `q`, with the leftover `theta` halved between
+the two ends. What falls out is `Z[2q] = Re(S[q])` and `Z[M-1-2q] = -Im(S[q])`; the odd-`j` case is
+the even one turned by `i`, because `e^{i(pi/2)(4p+1)}` is `i` for every `p`.
+
+**The direct sum stays in the file and is not dead code.** It is the fast transform's oracle: the
+suite runs both on random spectra at every block size the format allows and requires them to agree
+to 1e-9. They agree to between 8e-15 and 1.6e-12, growing with the block size the way accumulated
+double rounding does. End to end against ffmpeg a transform bug and a residue bug look exactly
+alike, which is why the transform has an oracle that owes nothing to either.
+
 ## What is left
 
-The inverse MDCT is a direct sum — N/2 coefficients times N outputs, a million multiply-adds for a
-2048-sample block. It decodes ten seconds of stereo in about 1.8 seconds, which is fine for
-converting files and poor for anything else. An FFT-based MDCT is the obvious next step, and the
-thing that makes it safe is now in place: a slow implementation known to be right to compare it
-against.
+Nothing pressing. The remaining time is spread across the residue decode, the floor synthesis and
+the codebook walk rather than concentrated anywhere.

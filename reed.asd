@@ -81,6 +81,7 @@ codecs (MP3 patents expired 2017)."
                                (:file "floor")
                                (:file "residue")
                                (:file "setup")
+                               (:file "imdct")
                                (:file "decode")))
                  ;; G.711 PCMU/PCMA companding
                  (:file "g711")
