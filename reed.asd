@@ -72,6 +72,16 @@ codecs (MP3 patents expired 2017)."
                                (:file "silk")
                                (:file "decode")
                                (:file "ogg")))
+                 ;; Vorbis I — floor 1, all three residue formats, channel coupling,
+                 ;; block switching, and Ogg demux
+                 (:module "vorbis"
+                  :serial t
+                  :components ((:file "bits")
+                               (:file "codebook")
+                               (:file "floor")
+                               (:file "residue")
+                               (:file "setup")
+                               (:file "decode")))
                  ;; G.711 PCMU/PCMA companding
                  (:file "g711")
                  ;; playing a file rather than converting one: incremental

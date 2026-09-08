@@ -17,6 +17,15 @@ Codecs today:
   inverse quantization, M/S and intensity stereo, PNS, TNS, and the sine/KBD
   IMDCT filterbank with all four window sequences. Verified to correlation
   1.000000 against ffmpeg and cross-checked against FAAD2.
+- **Vorbis I** — floor 1, all three residue formats, square polar channel
+  coupling, block switching with the hybrid windows that lap a long block
+  against a short one, and Ogg demux. Verified against libvorbis through ffmpeg:
+  **ten fixtures at correlation 1.000000** with a relative RMS error under
+  1e-4 — mono and stereo, q0 through q10, 22 and 44.1 kHz, transients, noise and
+  sweeps. Floor 0 (line spectral pairs) is refused by name; no encoder in use has
+  emitted it since the format was frozen. `src/vorbis/NOTES.md` has the account,
+  including the two places the specification says the opposite of every other
+  codec here.
 - **G.711** — ITU-T PCMU (µ-law) and PCMA (A-law) companding, encode and decode.
   Bit-exact to the ITU reference; used on the wire by
   [webrtc-media](https://github.com/modus-lisp/webrtc-media)'s RTP/SRTP audio.

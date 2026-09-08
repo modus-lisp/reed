@@ -29,6 +29,16 @@
    #:player-next-frame #:player-finished-p #:player-frames
    #:player-source-rate #:player-source-channels #:player-gain #:drain-source
 
+   ;; ==== Vorbis I ====
+   #:decode-vorbis-ogg #:decode-vorbis-file
+   #:decode-vorbis-packet #:vorbis-headers-from-xiph #:make-vorbis-decoder-for-headers
+   #:vorbis-packet-block-size #:vorbis-setup-from-headers
+   #:parse-identification #:parse-setup #:make-vorbis-decoder #:decode-audio-packet
+   #:vorbis-info #:vi-channels #:vi-rate #:vi-blocksize-0 #:vi-blocksize-1
+   #:vd-long-blocks #:vd-short-blocks #:vd-hybrid-windows #:vd-coupled-blocks
+   #:vd-unused-channels #:vs-codebooks #:vs-modes #:vs-info
+   #:vorbis-error #:vorbis-error-message
+
    ;; ==== MP3 (MPEG-1/2/2.5 Layer III) ====
    ;; one-shot decode -> pcm struct
    #:decode-mp3 #:decode-mp3-file
