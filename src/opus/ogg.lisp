@@ -35,6 +35,13 @@
              (seg-tbl (+ pos 27))
              (data (+ seg-tbl nsegs))
              (packets '()) (cur '()) (curlen 0))
+        ;; A TRUNCATED FILE IS A NORMAL THING TO BE HANDED.  The lacing table says how long the
+        ;; page is; if the file ends before that, the page is not there and neither is anything
+        ;; after it.  Walking on regardless makes GATHER-SEGMENTS index past the buffer, which
+        ;; surfaces as a SUBSEQ bounds error from somewhere three layers down rather than as
+        ;; "this file is cut short".
+        (when (> (+ data (loop for i below nsegs sum (aref octets (+ seg-tbl i)))) n)
+          (return))
         (dotimes (i nsegs)
           (let ((lv (aref octets (+ seg-tbl i))))
             (push (cons data lv) cur) (incf data lv) (incf curlen lv)
