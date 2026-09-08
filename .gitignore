@@ -34,3 +34,7 @@ test/reed-aac-music-decoded.wav
 test/reed-opus-celt-music.wav
 test/reed-opus-silk-voice.wav
 test/reed-opus-celt.png
+
+# ffmpeg's reference decodes for the Layer II check; regenerate with the recipes in
+# test/mp2-check.lisp, they are a megabyte and a half of raw samples
+test/vectors/*.pcm

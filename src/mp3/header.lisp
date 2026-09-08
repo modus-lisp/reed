@@ -45,9 +45,14 @@
 (defun valid-frame-sync-p (b0 b1)
   (and (= b0 #xff) (= (logand b1 #xe0) #xe0)))
 
-(defun parse-frame-header (word)
-  "Parse the 32-bit big-endian header WORD.  Returns a FRAME-HEADER, or NIL if
-the header is not a valid MPEG Layer III frame."
+(defun parse-frame-header (word &key (layer-wanted 3))
+  "Parse the 32-bit big-endian header WORD.  Returns a FRAME-HEADER, or NIL if the header is not a
+valid frame of the layer asked for.
+
+LAYER-WANTED is a parameter rather than something the caller checks afterwards because this doubles
+as the SYNC test: a run of bytes is taken to be a frame header only if it parses as one, and
+accepting a layer the caller cannot decode would let an MP3 stream resynchronise onto a false
+positive."
   (declare (type (unsigned-byte 32) word))
   (when (/= (logand word #xffe00000) #xffe00000) (return-from parse-frame-header nil))
   (let* ((ver-bits (ldb (byte 2 19) word))
@@ -56,18 +61,26 @@ the header is not a valid MPEG Layer III frame."
          (layer (case layer-bits (1 3) (2 2) (3 1) (t nil)))
          (br-idx (ldb (byte 4 12) word))
          (sr-idx (ldb (byte 2 10) word)))
-    (when (or (null version) (null layer) (/= layer 3)
+    (when (or (null version) (null layer) (/= layer layer-wanted)
               (= br-idx 0) (= br-idx 15) (= sr-idx 3))
       (return-from parse-frame-header nil))
     (let* ((ver-i (ecase version (:mpeg1 0) (:mpeg2 1) (:mpeg25 2)))
            (sr (aref (aref +samplerate+ ver-i) sr-idx))
-           (bitrate (aref (if (eq version :mpeg1) +bitrate-mpeg1-l3+ +bitrate-mpeg2-l3+)
+           ;; LAYER II AND LAYER III DO NOT SHARE A BIT RATE TABLE for MPEG-1 — 384 kbit/s exists
+           ;; in one and 40 in the other — though they do for the half-rate versions.
+           (bitrate (aref (cond ((/= layer 1) (if (eq version :mpeg1)
+                                                  (if (= layer 2) +mp2-bitrate-mpeg1+
+                                                      +bitrate-mpeg1-l3+)
+                                                  +bitrate-mpeg2-l3+))
+                                (t +bitrate-mpeg2-l3+))
                           br-idx))
            (mode (ldb (byte 2 6) word))
            (padding (ldb (byte 1 9) word))
            (mpeg1p (eq version :mpeg1))
-           (samples (if mpeg1p 1152 576))
-           (flen (+ (floor (* (if mpeg1p 144 72) bitrate) sr) padding))
+           ;; Layer II is 1152 samples a frame whatever the version; Layer III halves for the
+           ;; half-rate versions, and the frame length follows the sample count
+           (samples (if (or (= layer 2) mpeg1p) 1152 576))
+           (flen (+ (floor (* (if (= samples 1152) 144 72) bitrate) sr) padding))
            ;; scalefactor-band table index: 0/1/2 by rate for each version group
            (sfb-idx (ecase version
                       (:mpeg1  sr-idx)             ; 44100/48000/32000

@@ -39,6 +39,8 @@
    #:mp3-error #:mp3-error-message
 
    ;; ==== AAC-LC (MPEG-4 Audio Object Type 2) ====
+   ;; MPEG audio Layer II, which DVDs and broadcast carry
+   #:decode-mp2 #:make-mp2-decoder #:mp2-next-frame #:decode-mp2-packet
    #:decode-aac #:decode-aac-file
    ;; streaming AAC, for a container that hands over one access unit at a time
    #:make-aac-decoder #:decode-aac-packet

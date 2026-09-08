@@ -30,6 +30,10 @@ codecs (MP3 patents expired 2017)."
                                ;; what sits between a decoder and a device:
                                ;; rate conversion, downmix, gain, the mixer
                                (:file "dsp")))
+                 ;; Layer II's tables come first because the shared frame header needs its bit
+                 ;; rate table: Layer II and Layer III do not agree about what a bit rate index
+                 ;; means, and one header parser serves both.
+                 (:file "mp2/tables")
                  ;; MP3 (MPEG-1/2/2.5 Layer III) decode pipeline
                  (:module "mp3"
                   :serial t
@@ -43,6 +47,8 @@ codecs (MP3 patents expired 2017)."
                                (:file "synthesis")
                                (:file "layer3")
                                (:file "decode")))
+                 ;; Layer II proper, which reuses Layer III's polyphase filterbank
+                 (:file "mp2/decode")
                  ;; AAC-LC (MPEG-4 Audio Object Type 2) decode pipeline
                  (:module "aac"
                   :serial t
