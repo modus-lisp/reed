@@ -99,4 +99,6 @@ codecs (MP3 patents expired 2017)."
                  (:file "g711")
                  ;; playing a file rather than converting one: incremental
                  ;; decode -> resample -> fixed-size frames on demand
-                 (:file "player")))))
+                 (:file "player")
+                 ;; decoding off the loading thread: per-thread copies of the lazy tables
+                 (:file "threads")))))
