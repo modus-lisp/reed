@@ -15,21 +15,6 @@
 ;;; transform: X[k] = sum_n x[n] exp(-2j*pi*k*n/N), no 1/N scaling.
 ;;; ------------------------------------------------------------------
 
-(declaim (type hash-table *mdct-fft-exp-cache*))
-(defparameter *mdct-fft-exp-cache* (make-hash-table)
-  "Caches, per transform size N, the vector exp(-2j*pi*j/N) for j in 0..N-1.")
-
-(defun %mdct-fft-exp-table (n)
-  "Return (simple-array (complex double-float) (n)) of exp(-2j*pi*j/N)."
-  (declare (type fixnum n))
-  (or (gethash n *mdct-fft-exp-cache*)
-      (setf (gethash n *mdct-fft-exp-cache*)
-            (let ((tbl (make-array n :element-type '(complex double-float))))
-              (dotimes (j n tbl)
-                (let ((ang (/ (* -2d0 pi (float j 1d0)) (float n 1d0))))
-                  (setf (aref tbl j)
-                        (complex (cos ang) (sin ang)))))))))
-
 (defun %mdct-smallest-factor (n)
   "Smallest prime factor of N (>1); returns N itself if prime."
   (declare (type fixnum n))
@@ -40,41 +25,6 @@
       (when (zerop (mod n d)) (return-from %mdct-smallest-factor d))
       (incf d 2))
     n))
-
-(defun %mdct-fft (x n)
-  "Recursive mixed-radix forward FFT of the length-N complex vector X.
-Returns a fresh (simple-array (complex double-float) (n))."
-  (declare (type fixnum n)
-           (type (simple-array (complex double-float) (*)) x))
-  (when (= n 1)
-    (let ((r (make-array 1 :element-type '(complex double-float))))
-      (setf (aref r 0) (aref x 0))
-      (return-from %mdct-fft r)))
-  (let* ((p (%mdct-smallest-factor n))
-         (m (truncate n p))
-         (subs (make-array p))
-         (table (%mdct-fft-exp-table n))
-         (result (make-array n :element-type '(complex double-float))))
-    (declare (type fixnum p m)
-             (type (simple-array (complex double-float) (*)) table result))
-    ;; Decimation in time: gather the p subsequences x[b], x[b+p], ... and
-    ;; recursively transform each (size m).
-    (dotimes (b p)
-      (let ((xb (make-array m :element-type '(complex double-float))))
-        (dotimes (a m)
-          (setf (aref xb a) (aref x (+ (* p a) b))))
-        (setf (aref subs b) (%mdct-fft xb m))))
-    ;; Combine: X[k] = sum_b W_N^{b*k} * Y_b[k mod m].
-    (dotimes (k n result)
-      (let ((kk (mod k m))
-            (acc #C(0d0 0d0)))
-        (declare (type (complex double-float) acc))
-        (dotimes (b p)
-          (let ((yb (aref subs b)))
-            (declare (type (simple-array (complex double-float) (*)) yb))
-            (incf acc (* (aref table (mod (* b k) n))
-                         (aref yb kk)))))
-        (setf (aref result k) acc)))))
 
 ;;; ------------------------------------------------------------------
 ;;; Trig table cache: trig[i] = cos(2*pi*(i+0.125)/Nshift) for i in 0..N2-1.
@@ -115,6 +65,87 @@ Returns a fresh (simple-array (complex double-float) (n))."
 ;;; clt_mdct_backward
 ;;; ------------------------------------------------------------------
 
+;;; ------------------------------------------------------------------
+;;; Split-array FFT (unscaled forward DFT, mixed radix by decimation in
+;;; time) on separate real/imaginary double-float vectors, with Cooley-Tukey
+;;; butterflies: the twiddled terms t_b = W_N^{bk} Y_b[k] are formed ONCE per k
+;;; and combined into all p outputs X[k + m q] by a small p-point DFT (a plain
+;;; butterfly for p = 2).  It replaced a (complex double-float) version that
+;;; allocated per recursion level and recomputed every product for every
+;;; output; on a Lisp without unboxed complex arrays each of its elements was a
+;;; boxed object, and modus spent most of an Opus decode building and
+;;; dispatching them.  Output is byte-identical on the conformance vectors.
+;;; ------------------------------------------------------------------
+
+(declaim (type hash-table *mdct-twiddle-cache*))
+(defparameter *mdct-twiddle-cache* (make-hash-table)
+  "Per transform size N, (cos . sin) vectors of exp(-2 pi i j / N) for j < N.")
+
+(defun %mdct-twiddles (n)
+  (declare (type fixnum n))
+  (or (gethash n *mdct-twiddle-cache*)
+      (setf (gethash n *mdct-twiddle-cache*)
+            (let ((c (make-array n :element-type 'double-float))
+                  (sn (make-array n :element-type 'double-float)))
+              (dotimes (j n (cons c sn))
+                (let ((ang (/ (* -2d0 pi (float j 1d0)) (float n 1d0))))
+                  (setf (aref c j) (cos ang) (aref sn j) (sin ang))))))))
+
+(defun %fft-split (xr xi x0 xs n yr yi y0 tw-c tw-s tw-n)
+  "Forward DFT of the N points X[x0 + xs*j] (j < N) of XR/XI into YR/YI at
+Y0..Y0+N-1.  TW-C/TW-S are the twiddles of size TW-N (a multiple of N)."
+  (declare (type (simple-array double-float (*)) xr xi yr yi tw-c tw-s)
+           (type fixnum x0 xs n y0 tw-n)
+           (optimize (speed 2) (safety 1)))
+  (if (= n 1)
+      (setf (aref yr y0) (aref xr x0) (aref yi y0) (aref xi x0))
+      (let* ((p (%mdct-smallest-factor n))
+             (m (truncate n p))
+             (step (truncate tw-n n)))
+        (declare (type fixnum p m step))
+        ;; Y_b = DFT of the b-th decimated subsequence, into Y[y0 + b*m ...].
+        (dotimes (b p)
+          (%fft-split xr xi (+ x0 (* xs b)) (* xs p) m yr yi (+ y0 (* b m))
+                      tw-c tw-s tw-n))
+        (if (= p 2)
+            ;; radix 2: X[k] = Y0 + W^k Y1, X[k+m] = Y0 - W^k Y1
+            (dotimes (k m)
+              (let* ((i0 (+ y0 k)) (i1 (+ i0 m))
+                     (wi (* step k))
+                     (wr (aref tw-c wi)) (ws (aref tw-s wi))
+                     (br (aref yr i1)) (bi (aref yi i1))
+                     (tr (- (* wr br) (* ws bi)))
+                     (ti (+ (* wr bi) (* ws br)))
+                     (ar (aref yr i0)) (ai (aref yi i0)))
+                (declare (type fixnum i0 i1 wi)
+                         (type double-float wr ws br bi tr ti ar ai))
+                (setf (aref yr i0) (+ ar tr) (aref yi i0) (+ ai ti)
+                      (aref yr i1) (- ar tr) (aref yi i1) (- ai ti))))
+            ;; radix p: t_b = W_N^{bk} Y_b[k], then X[k + m q] = sum_b t_b W_p^{bq}
+            (let ((tr (make-array p :element-type 'double-float))
+                  (ti (make-array p :element-type 'double-float)))
+              (dotimes (k m)
+                (dotimes (b p)
+                  (let* ((ib (+ y0 (* b m) k))
+                         (wi (mod (* step b k) tw-n))
+                         (wr (aref tw-c wi)) (ws (aref tw-s wi))
+                         (vr (aref yr ib)) (vi (aref yi ib)))
+                    (declare (type fixnum ib wi) (type double-float wr ws vr vi))
+                    (setf (aref tr b) (- (* wr vr) (* ws vi))
+                          (aref ti b) (+ (* wr vi) (* ws vr)))))
+                (dotimes (q p)
+                  (let ((sr 0d0) (si 0d0))
+                    (declare (type double-float sr si))
+                    (dotimes (b p)
+                      (let* ((wi (mod (* step m b q) tw-n))
+                             (wr (aref tw-c wi)) (ws (aref tw-s wi))
+                             (vr (aref tr b)) (vi (aref ti b)))
+                        (declare (type fixnum wi) (type double-float wr ws vr vi))
+                        (setf sr (+ sr (- (* wr vr) (* ws vi)))
+                              si (+ si (+ (* wr vi) (* ws vr))))))
+                    (setf (aref yr (+ y0 k (* m q))) sr
+                          (aref yi (+ y0 k (* m q))) si)))))))))
+
 (defun clt-mdct-backward (in in-off out out-off nfull overlap shift stride window)
   "Inverse CELT MDCT.  IN is a spectral (simple-array double-float) read with
 STRIDE starting at IN-OFF; OUT is the time-domain (simple-array double-float)
@@ -129,27 +160,30 @@ block's tail on entry (it is folded by the TDAC step, not zeroed)."
          (n4 (ash nshift -2))
          (trig (%mdct-trig-table nshift))
          (base (+ out-off (ash overlap -1)))
-         (f (make-array n4 :element-type '(complex double-float))))
+         (fr (make-array n4 :element-type 'double-float))
+         (fi (make-array n4 :element-type 'double-float))
+         (gr (make-array n4 :element-type 'double-float))
+         (gi (make-array n4 :element-type 'double-float))
+         (tw (%mdct-twiddles n4)))
     (declare (type fixnum nshift n2 n4 base)
-             (type (simple-array double-float (*)) trig)
-             (type (simple-array (complex double-float) (*)) f))
+             (type (simple-array double-float (*)) trig fr fi gr gi))
     ;; --- pre-rotate into F (natural order) ---
     (dotimes (i n4)
       (let* ((x1 (aref in (+ in-off (* stride (* 2 i)))))
              (x2 (aref in (+ in-off (* stride (- n2 1 (* 2 i))))))
              (ti (aref trig i))
              (tn (aref trig (+ n4 i)))
-             (fr (+ (* x2 ti) (* x1 tn)))    ; yr
-             (fi (- (* x1 ti) (* x2 tn))))   ; yi
-        (setf (aref f i) (complex fi fr))))
+             (yr (+ (* x2 ti) (* x1 tn)))
+             (yi (- (* x1 ti) (* x2 tn))))
+        ;; the complex point is (yi + i yr): real part yi, imaginary part yr
+        (setf (aref fr i) yi (aref fi i) yr)))
     ;; --- forward FFT (no scaling) ---
-    (let ((g (%mdct-fft f n4)))
-      (declare (type (simple-array (complex double-float) (*)) g))
+    (%fft-split fr fi 0 1 n4 gr gi 0 (car tw) (cdr tw) n4)
+    (progn
       ;; --- post-rotate / de-shuffle ---
       (dotimes (i n4)
-        (let* ((gi (aref g i))
-               (re (imagpart gi))
-               (im (realpart gi))
+        (let* ((re (aref gi i))
+               (im (aref gr i))
                (ti (aref trig i))
                (tn (aref trig (+ n4 i)))
                (yr (+ (* re ti) (* im tn)))

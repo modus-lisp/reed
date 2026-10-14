@@ -14,7 +14,7 @@
 (defmacro with-thread-state (() &body body)
   "BODY with reed's lazily built decoder tables private to this thread.  Costs one rebuild of
    whatever tables the thread's codecs use; a decode on the loading thread does not need it."
-  `(let ((*mdct-fft-exp-cache* (make-hash-table))
+  `(let ((*mdct-twiddle-cache* (make-hash-table))
          (*mdct-trig-cache* (make-hash-table))
          (*vorbis-imdct-tables* (make-hash-table))
          (*fft-plans* (make-hash-table))
