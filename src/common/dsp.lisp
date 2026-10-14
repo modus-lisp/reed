@@ -90,7 +90,7 @@ transition band comfortably inside what an 8 kHz channel throws away anyway.")
   (step 1d0 :type double-float)        ; input samples advanced per output sample
   (cutoff 1d0 :type double-float)      ; filter cutoff, as a fraction of the input Nyquist
   (half 12 :type fixnum)               ; kernel half-width, in input samples
-  (kernel #() :type simple-vector)
+  (kernel (make-array 0 :element-type 'double-float) :type (simple-array double-float (*)))
   (buf (make-pcm16 0))                 ; input history + pending input
   (fill 0 :type fixnum)                ; valid samples in BUF
   (base 0 :type fixnum)                ; stream index of BUF[0]
@@ -98,8 +98,10 @@ transition band comfortably inside what an 8 kHz channel throws away anyway.")
   (drained nil))
 
 (defun %build-kernel (cutoff half)
+  ;; A SPECIALIZED double vector: read once per tap, a general vector of boxed doubles cost an
+  ;; unboxing every time, on the hottest loop in the audio path.
   (let* ((n (1+ (* half +kernel-density+)))
-         (k (make-array n)))
+         (k (make-array n :element-type 'double-float)))
     (dotimes (i n k)
       (let* ((x (/ (float i 1d0) +kernel-density+))       ; distance in input samples
              (a (* pi cutoff x))
@@ -127,12 +129,15 @@ is what makes a stream converted in pieces identical to the same stream converte
 (declaim (inline %tap))
 (defun %tap (kernel half d)
   "Kernel weight at distance D (in input samples), by table lookup + lerp."
-  (let ((x (* (abs d) +kernel-density+)))
-    (if (>= x (* half +kernel-density+))
+  (declare (type (simple-array double-float (*)) kernel) (type fixnum half)
+           (type double-float d) (optimize (speed 3) (safety 0)))
+  (let ((x (* (abs d) (float +kernel-density+ 1d0))))
+    (if (>= x (float (* half +kernel-density+) 1d0))
         0d0
-        (let* ((i (floor x)) (f (- x i)))
-          (+ (* (- 1d0 f) (the double-float (aref kernel i)))
-             (* f (the double-float (aref kernel (1+ i)))))))))
+        (multiple-value-bind (i f) (floor x)
+          (declare (type fixnum i) (type double-float f))
+          (+ (* (- 1d0 f) (aref kernel i))
+             (* f (aref kernel (1+ i))))))))
 
 (defun %ensure-room (rs n)
   (let ((buf (resampler-buf rs)))
@@ -170,16 +175,25 @@ player calls this with FINAL t once the decoder is done, and gets the last few m
          (limit (if final (float end 1d0) (- end half)))
          (out '())
          (n 0))
-    (loop while (< (resampler-pos rs) limit)
-          do (let* ((p (resampler-pos rs))
-                    (lo (max base (ceiling (- p half))))
-                    (hi (min (1- end) (floor (+ p half))))
-                    (acc 0d0))
-               (loop for i from lo to hi
-                     do (incf acc (* (aref buf (- i base)) (%tap kernel half (- i p)))))
-               (push (clamp16 acc) out)
-               (incf n)
-               (incf (resampler-pos rs) step)))
+    ;; TYPED, because this is the loop: an output sample is 2*HALF+1 taps (145 when going from
+    ;; 48 kHz to 8 kHz), and untyped it ran every one through generic arithmetic -- most of a
+    ;; core for one 8 kHz listener.  Same operations in the same order, so the same samples.
+    (let ((buf buf) (base base) (half half) (kernel kernel) (step step) (end end)
+          (limit (float limit 1d0)))
+      (declare (type pcm16-vector buf) (type fixnum base half end)
+               (type (simple-array double-float (*)) kernel) (type double-float step limit))
+      (loop while (< (resampler-pos rs) limit)
+            do (let* ((p (resampler-pos rs))
+                      (lo (max base (ceiling (- p half))))
+                      (hi (min (1- end) (floor (+ p half))))
+                      (acc 0d0))
+                 (declare (type double-float p acc) (type fixnum lo hi))
+                 (loop for i of-type fixnum from lo to hi
+                       do (incf acc (* (float (aref buf (- i base)) 1d0)
+                                       (%tap kernel half (- (float i 1d0) p)))))
+                 (push (clamp16 acc) out)
+                 (incf n)
+                 (incf (resampler-pos rs) step))))
     (%discard-consumed rs)
     (let ((v (make-pcm16 n)))
       (loop for s in out for i downfrom (1- n) do (setf (aref v i) s))
